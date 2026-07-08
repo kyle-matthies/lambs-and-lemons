@@ -377,8 +377,8 @@ function drawScene(
 
   const standX = width * 0.28
   const standY = height * 0.62
-  // Lammy peeks out from behind the counter.
-  drawSprite(context, assets.lambIdle, standX + 34 * scale, standY - 44 * scale, 62 * scale, 66 * scale, false)
+  // Lammy peeks out beside the right post of her stand.
+  drawSprite(context, assets.lambIdle, standX + 82 * scale, standY - 34 * scale, 66 * scale, 70 * scale, false)
   drawSprite(context, assets.stand, standX, standY, 180 * scale, 168 * scale, false)
   drawDecorations(context, standX, standY, 1.35 * scale, state.decorations)
 
