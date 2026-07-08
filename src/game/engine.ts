@@ -1,103 +1,45 @@
-import type { GameAssets } from './assets'
-
-export type GamePhase = 'ready' | 'playing' | 'ended'
-export type RoundMinutes = 1 | 2 | 3 | 4 | 5
-
-export interface GameInput {
-  active: boolean
-  x: number
-  y: number
-}
-
-export interface GameSnapshot {
-  phase: GamePhase
-  roundMinutes: RoundMinutes
-  timeLeft: number
-  score: number
-  sold: number
-  lemons: number
-  juice: number
-  leaves: number
-  nearStand: boolean
-  canSell: boolean
-}
-
-export interface BestRound {
-  sold: number
-  score: number
-}
-
-type Inventory = {
-  lemons: number
-  juice: number
-  leaves: number
-  sold: number
-  score: number
-}
-
-type Player = {
-  x: number
-  y: number
-  facingX: number
-  facingY: number
-  swingTimer: number
-  swingCooldown: number
-}
-
-type Lemon = {
-  id: number
-  x: number
-  y: number
-  vx: number
-  vy: number
-}
-
-type Leaf = {
-  id: number
-  x: number
-  y: number
-  vx: number
-  vy: number
-}
-
-type Tree = {
-  id: number
-  x: number
-  y: number
-  health: number
-  broken: boolean
-}
-
-type Effect = {
-  id: number
-  x: number
-  y: number
-  ttl: number
-  maxTtl: number
-  size: number
-}
-
-export interface GameState {
-  width: number
-  height: number
-  phase: GamePhase
-  roundMinutes: RoundMinutes
-  timeLeft: number
-  player: Player
-  stand: { x: number; y: number }
-  trees: Tree[]
-  lemons: Lemon[]
-  leaves: Leaf[]
-  effects: Effect[]
-  inventory: Inventory
-  nextId: number
-}
-
-const PLAYER_RADIUS = 28
-const PICKUP_RADIUS = 31
-const SELL_RADIUS = 96
-const LEMONS_PER_CUP = 3
-const LEAVES_PER_CUP = 1
+import {
+  BREW_TIME,
+  BURST_ON_BREAK,
+  BURST_PER_HIT,
+  COMBO_MIN_LEVEL,
+  COMBO_WINDOW,
+  COUNTDOWN_TICKS_FROM,
+  LEAF_SPAWN_INTERVAL,
+  LEMON_PARTS_PER_CUP,
+  LEMON_SPAWN_INTERVAL,
+  MAX_GROUND_LEAVES,
+  MAX_GROUND_LEMONS,
+  PICKUP_RADIUS,
+  PLAYER_RADIUS,
+  PLAYER_SPEED,
+  SCORE_COMBO_BONUS,
+  SCORE_CUP,
+  SCORE_PICKUP,
+  SCORE_SMASH,
+  SCORE_SPARKLE_CUP,
+  SCORE_TREE_HIT,
+  SELL_RADIUS,
+  SMASH_BODY_RADIUS,
+  SMASH_RADIUS,
+  SWING_COOLDOWN,
+  SWING_REACH,
+  SWING_TIME,
+  TREE_HEALTH,
+  TREE_HIT_RADIUS,
+  TREE_REGROW_POP,
+  TREE_RESPAWN_TIME,
+  TREE_WOBBLE_TIME,
+} from './constants'
+import type {
+  GameInput,
+  GamePhase,
+  GameSnapshot,
+  GameState,
+  RollingItem,
+  RoundMinutes,
+  Tree,
+} from './types'
 
 export function createGame(
   width: number,
@@ -110,7 +52,7 @@ export function createGame(
   let nextId = 1
   const id = () => nextId++
 
-  const lemons: Lemon[] = [
+  const lemons: RollingItem[] = [
     [0.36, 0.42],
     [0.61, 0.45],
     [0.47, 0.56],
@@ -119,15 +61,9 @@ export function createGame(
     [0.39, 0.74],
     [0.68, 0.76],
     [0.55, 0.67],
-  ].map(([x, y]) => ({
-    id: id(),
-    x: x * safeWidth,
-    y: y * safeHeight,
-    vx: 0,
-    vy: 0,
-  }))
+  ].map(([x, y]) => ({ id: id(), x: x * safeWidth, y: y * safeHeight, vx: 0, vy: 0 }))
 
-  const leaves: Leaf[] = [
+  const leaves: RollingItem[] = [
     [0.31, 0.5],
     [0.53, 0.5],
     [0.73, 0.48],
@@ -136,13 +72,7 @@ export function createGame(
     [0.59, 0.61],
     [0.75, 0.68],
     [0.28, 0.75],
-  ].map(([x, y]) => ({
-    id: id(),
-    x: x * safeWidth,
-    y: y * safeHeight,
-    vx: 0,
-    vy: 0,
-  }))
+  ].map(([x, y]) => ({ id: id(), x: x * safeWidth, y: y * safeHeight, vx: 0, vy: 0 }))
 
   const trees: Tree[] = [
     [0.17, 0.29],
@@ -154,8 +84,11 @@ export function createGame(
     id: id(),
     x: x * safeWidth,
     y: y * safeHeight,
-    health: 3,
-    broken: false,
+    health: TREE_HEALTH,
+    stage: 'full' as const,
+    respawnTimer: 0,
+    regrowTimer: 0,
+    wobbleTimer: 0,
   }))
 
   return {
@@ -177,13 +110,23 @@ export function createGame(
     lemons,
     leaves,
     effects: [],
-    inventory: {
-      lemons: 0,
-      juice: 0,
-      leaves: 0,
-      sold: 0,
-      score: 0,
+    inventory: { lemons: 0, juice: 0, leaves: 0, sold: 0, score: 0 },
+    stats: {
+      lemonsSmashed: 0,
+      treeHits: 0,
+      treesBroken: 0,
+      lemonsCollected: 0,
+      leavesCollected: 0,
+      cupsSold: 0,
+      sparkleCups: 0,
     },
+    brewProgress: 0,
+    comboCount: 0,
+    comboTimer: 0,
+    lemonSpawnTimer: LEMON_SPAWN_INTERVAL,
+    leafSpawnTimer: LEAF_SPAWN_INTERVAL,
+    lastWholeSecond: roundMinutes * 60,
+    events: [],
     nextId,
   }
 }
@@ -213,22 +156,29 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
   const player = state.player
   player.swingTimer = Math.max(0, player.swingTimer - dt)
   player.swingCooldown = Math.max(0, player.swingCooldown - dt)
+  updateTrees(state, dt)
+  updateEffects(state, dt)
 
-  if (state.phase !== 'playing') {
-    updateEffects(state, dt)
-    return
-  }
+  if (state.phase !== 'playing') return
 
   state.timeLeft = Math.max(0, state.timeLeft - dt)
+  const wholeSecond = Math.ceil(state.timeLeft)
+  if (wholeSecond !== state.lastWholeSecond) {
+    state.lastWholeSecond = wholeSecond
+    if (wholeSecond > 0 && wholeSecond <= COUNTDOWN_TICKS_FROM) {
+      state.events.push({ type: 'countdown', secondsLeft: wholeSecond })
+    }
+  }
   if (state.timeLeft <= 0) {
     state.phase = 'ended'
+    state.brewProgress = 0
+    state.events.push({ type: 'timeUp' })
     return
   }
 
   if (input.active) {
-    const speed = 185
-    player.x += input.x * speed * dt
-    player.y += input.y * speed * dt
+    player.x += input.x * PLAYER_SPEED * dt
+    player.y += input.y * PLAYER_SPEED * dt
     if (Math.abs(input.x) + Math.abs(input.y) > 0.08) {
       player.facingX = input.x
       player.facingY = input.y
@@ -236,69 +186,78 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
     clampPlayer(state)
   }
 
+  state.comboTimer = Math.max(0, state.comboTimer - dt)
+  if (state.comboTimer === 0) state.comboCount = 0
+
+  updateSpawning(state, dt)
   updateRollingItems(state, dt)
   collectItems(state)
-  updateEffects(state, dt)
+  updateBrewing(state, dt)
 }
 
 export function swingHammer(state: GameState) {
   if (state.phase !== 'playing' || state.player.swingCooldown > 0) return
 
   const player = state.player
-  player.swingTimer = 0.32
-  player.swingCooldown = 0.2
+  player.swingTimer = SWING_TIME
+  player.swingCooldown = SWING_COOLDOWN
   const length = Math.hypot(player.facingX, player.facingY) || 1
   const aimX = player.facingX / length
   const aimY = player.facingY / length
-  const hitX = player.x + aimX * 58
-  const hitY = player.y + aimY * 58
+  const hitX = player.x + aimX * SWING_REACH
+  const hitY = player.y + aimY * SWING_REACH
   let hitSomething = false
 
   const smashedIds = new Set<number>()
   state.lemons.forEach((lemon) => {
     if (
-      distance(lemon.x, lemon.y, hitX, hitY) < 74 ||
-      distance(lemon.x, lemon.y, player.x, player.y) < 48
+      distance(lemon.x, lemon.y, hitX, hitY) < SMASH_RADIUS ||
+      distance(lemon.x, lemon.y, player.x, player.y) < SMASH_BODY_RADIUS
     ) {
       smashedIds.add(lemon.id)
-      state.inventory.score += 1
+      state.inventory.score += SCORE_SMASH
       state.inventory.juice += 1
+      state.stats.lemonsSmashed += 1
       addSplat(state, lemon.x, lemon.y, 72)
+      state.events.push({ type: 'smash', x: lemon.x, y: lemon.y })
+      registerComboHit(state, lemon.x, lemon.y)
       hitSomething = true
     }
   })
   state.lemons = state.lemons.filter((lemon) => !smashedIds.has(lemon.id))
 
   state.trees.forEach((tree) => {
-    if (tree.broken || distance(tree.x, tree.y, hitX, hitY) >= 96) return
+    if (tree.stage !== 'full' || distance(tree.x, tree.y, hitX, hitY) >= TREE_HIT_RADIUS) return
 
     tree.health -= 1
+    tree.wobbleTimer = TREE_WOBBLE_TIME
     hitSomething = true
-    addSplat(state, tree.x, tree.y - 20, 92)
+    state.inventory.score += SCORE_TREE_HIT
+    state.stats.treeHits += 1
+    registerComboHit(state, tree.x, tree.y)
     if (tree.health <= 0) {
-      tree.broken = true
-      state.inventory.score += 2
-      dropFromTree(state, tree)
+      tree.stage = 'broken'
+      tree.respawnTimer = TREE_RESPAWN_TIME
+      state.stats.treesBroken += 1
+      burstItems(state, tree.x, tree.y, BURST_ON_BREAK.lemons, BURST_ON_BREAK.leaves)
+      state.events.push({ type: 'treeBreak', x: tree.x, y: tree.y })
+    } else {
+      burstItems(state, tree.x, tree.y, BURST_PER_HIT.lemons, BURST_PER_HIT.leaves)
+      state.events.push({ type: 'treeHit', x: tree.x, y: tree.y })
     }
   })
 
   if (!hitSomething) {
     addSplat(state, hitX, hitY, 46)
+    state.events.push({ type: 'whiff', x: hitX, y: hitY })
   }
 }
 
-export function sellLemonade(state: GameState) {
-  if (!canSell(state)) return false
-
-  let lemonPartsNeeded = LEMONS_PER_CUP
-  const juiceUsed = Math.min(state.inventory.juice, lemonPartsNeeded)
-  state.inventory.juice -= juiceUsed
-  lemonPartsNeeded -= juiceUsed
-  state.inventory.lemons -= lemonPartsNeeded
-  state.inventory.leaves -= LEAVES_PER_CUP
-  state.inventory.sold += 1
-  addSplat(state, state.stand.x, state.stand.y + 28, 62)
-  return true
+export function drainEvents(state: GameState) {
+  if (state.events.length === 0) return []
+  const events = state.events
+  state.events = []
+  return events
 }
 
 export function takeSnapshot(state: GameState): GameSnapshot {
@@ -312,103 +271,137 @@ export function takeSnapshot(state: GameState): GameSnapshot {
     juice: state.inventory.juice,
     leaves: state.inventory.leaves,
     nearStand: isNearStand(state),
-    canSell: canSell(state),
+    brewing: state.brewProgress > 0,
+    combo: state.comboCount >= COMBO_MIN_LEVEL ? state.comboCount : 0,
+    stats: { ...state.stats },
   }
 }
 
-export function drawGame(
-  context: CanvasRenderingContext2D,
-  state: GameState,
-  assets: GameAssets,
-) {
-  const { width, height } = state
-  const scale = Math.max(0.82, Math.min(width / 390, height / 844))
-  context.clearRect(0, 0, width, height)
-  context.drawImage(assets.background, 0, 0, width, height)
-  drawSprite(context, assets.sun, width * 0.02, height * 0.018, 74 * scale, 74 * scale)
+function registerComboHit(state: GameState, x: number, y: number) {
+  state.comboCount += 1
+  state.comboTimer = COMBO_WINDOW
+  if (state.comboCount >= COMBO_MIN_LEVEL) {
+    state.inventory.score += SCORE_COMBO_BONUS
+    state.events.push({ type: 'combo', x, y, level: state.comboCount })
+  }
+}
 
-  const drawables: { y: number; draw: () => void }[] = []
+function lemonParts(state: GameState) {
+  return state.inventory.lemons + state.inventory.juice
+}
 
-  drawables.push({
-    y: state.stand.y + 52,
-    draw: () =>
-      drawSprite(context, assets.stand, state.stand.x, state.stand.y, 126 * scale, 118 * scale),
-  })
+function updateBrewing(state: GameState, dt: number) {
+  const canBrew = isNearStand(state) && lemonParts(state) >= LEMON_PARTS_PER_CUP
+  if (!canBrew) {
+    state.brewProgress = 0
+    return
+  }
 
+  state.brewProgress += dt / BREW_TIME
+  if (state.brewProgress < 1) return
+  state.brewProgress = 0
+
+  let partsNeeded = LEMON_PARTS_PER_CUP
+  const juiceUsed = Math.min(state.inventory.juice, partsNeeded)
+  state.inventory.juice -= juiceUsed
+  partsNeeded -= juiceUsed
+  state.inventory.lemons -= partsNeeded
+
+  const sparkle = state.inventory.leaves > 0
+  if (sparkle) {
+    state.inventory.leaves -= 1
+    state.stats.sparkleCups += 1
+  }
+  state.inventory.sold += 1
+  state.stats.cupsSold += 1
+  state.inventory.score += sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
+  addSplat(state, state.stand.x, state.stand.y + 28, 62)
+  state.events.push({ type: 'cupSold', x: state.stand.x, y: state.stand.y, sparkle })
+}
+
+function updateTrees(state: GameState, dt: number) {
   state.trees.forEach((tree) => {
-    drawables.push({
-      y: tree.y + 54,
-      draw: () =>
-        drawSprite(
-          context,
-          tree.broken ? assets.stump : assets.tree,
-          tree.x,
-          tree.y,
-          (tree.broken ? 100 : 122) * scale,
-          (tree.broken ? 92 : 132) * scale,
-        ),
-    })
-  })
+    tree.wobbleTimer = Math.max(0, tree.wobbleTimer - dt)
+    tree.regrowTimer = Math.max(0, tree.regrowTimer - dt)
+    if (tree.stage !== 'broken' || state.phase !== 'playing') return
 
-  state.lemons.forEach((lemon) => {
-    drawables.push({
-      y: lemon.y + 15,
-      draw: () => drawSprite(context, assets.lemon, lemon.x, lemon.y, 34 * scale, 34 * scale),
-    })
-  })
-
-  state.leaves.forEach((leaf) => {
-    drawables.push({
-      y: leaf.y + 13,
-      draw: () => drawSprite(context, assets.leaf, leaf.x, leaf.y, 32 * scale, 28 * scale),
-    })
-  })
-
-  drawables.push({
-    y: state.player.y + 39,
-    draw: () => {
-      const swinging = state.player.swingTimer > 0
-      drawSprite(
-        context,
-        swinging ? assets.lambSwing : assets.lambIdle,
-        state.player.x,
-        state.player.y,
-        (swinging ? 122 : 82) * scale,
-        (swinging ? 92 : 88) * scale,
-        state.player.facingX < -0.1,
-      )
-    },
-  })
-
-  drawables
-    .sort((a, b) => a.y - b.y)
-    .forEach((drawable) => {
-      drawable.draw()
-    })
-
-  state.effects.forEach((effect) => {
-    context.save()
-    context.globalAlpha = Math.max(0, effect.ttl / effect.maxTtl)
-    drawSprite(context, assets.splat, effect.x, effect.y, effect.size * scale, effect.size * scale)
-    context.restore()
+    tree.respawnTimer -= dt
+    if (tree.respawnTimer <= 0) {
+      tree.stage = 'full'
+      tree.health = TREE_HEALTH
+      tree.regrowTimer = TREE_REGROW_POP
+      state.events.push({ type: 'treeRegrow', x: tree.x, y: tree.y })
+    }
   })
 }
 
-function canSell(state: GameState) {
-  return (
-    state.phase === 'playing' &&
-    isNearStand(state) &&
-    state.inventory.lemons + state.inventory.juice >= LEMONS_PER_CUP &&
-    state.inventory.leaves >= LEAVES_PER_CUP
-  )
+function updateSpawning(state: GameState, dt: number) {
+  state.lemonSpawnTimer -= dt
+  if (state.lemonSpawnTimer <= 0) {
+    state.lemonSpawnTimer = LEMON_SPAWN_INTERVAL
+    if (state.lemons.length < MAX_GROUND_LEMONS) {
+      state.lemons.push(spawnItem(state))
+    }
+  }
+
+  state.leafSpawnTimer -= dt
+  if (state.leafSpawnTimer <= 0) {
+    state.leafSpawnTimer = LEAF_SPAWN_INTERVAL
+    if (state.leaves.length < MAX_GROUND_LEAVES) {
+      state.leaves.push(spawnItem(state))
+    }
+  }
 }
 
-function isNearStand(state: GameState) {
+function spawnItem(state: GameState): RollingItem {
+  // Keep spawns out of the stand corner so pickups never feel accidental.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const x = 40 + Math.random() * (state.width - 80)
+    const y = 120 + Math.random() * (state.height - 260)
+    if (distance(x, y, state.stand.x, state.stand.y) > SELL_RADIUS * 1.1) {
+      return { id: state.nextId++, x, y, vx: 0, vy: 0 }
+    }
+  }
+  return {
+    id: state.nextId++,
+    x: state.width * 0.5,
+    y: state.height * 0.6,
+    vx: 0,
+    vy: 0,
+  }
+}
+
+function burstItems(state: GameState, x: number, y: number, lemons: number, leaves: number) {
+  for (let index = 0; index < lemons; index += 1) {
+    const angle = (Math.PI * 2 * index) / lemons + Math.random() * 0.3
+    state.lemons.push({
+      id: state.nextId++,
+      x: x + Math.cos(angle) * 30,
+      y: y + Math.sin(angle) * 22,
+      vx: Math.cos(angle) * (120 + Math.random() * 80),
+      vy: Math.sin(angle) * (90 + Math.random() * 70),
+    })
+  }
+
+  for (let index = 0; index < leaves; index += 1) {
+    const angle = (Math.PI * 2 * index) / leaves + 0.5 + Math.random() * 0.4
+    state.leaves.push({
+      id: state.nextId++,
+      x: x + Math.cos(angle) * 30,
+      y: y + Math.sin(angle) * 24,
+      vx: Math.cos(angle) * (90 + Math.random() * 70),
+      vy: Math.sin(angle) * (90 + Math.random() * 60),
+    })
+  }
+}
+
+export function isNearStand(state: GameState) {
   return distance(state.player.x, state.player.y, state.stand.x, state.stand.y) < SELL_RADIUS
 }
 
 function clampPlayer(state: GameState) {
-  const top = Math.max(88, state.height * 0.1)
+  // Keep the lamb below the two HUD rows (~200px) so she never hides under them.
+  const top = Math.max(190, state.height * 0.22)
   const bottom = state.height - Math.max(118, state.height * 0.13)
   state.player.x = clamp(state.player.x, PLAYER_RADIUS, state.width - PLAYER_RADIUS)
   state.player.y = clamp(state.player.y, top, bottom)
@@ -416,7 +409,7 @@ function clampPlayer(state: GameState) {
 
 function updateRollingItems(state: GameState, dt: number) {
   const friction = Math.pow(0.05, dt)
-  const update = (item: Lemon | Leaf) => {
+  const update = (item: RollingItem) => {
     item.x += item.vx * dt
     item.y += item.vy * dt
     item.vx *= friction
@@ -432,24 +425,26 @@ function updateRollingItems(state: GameState, dt: number) {
 }
 
 function collectItems(state: GameState) {
-  const keptLemons: Lemon[] = []
+  const keptLemons: RollingItem[] = []
   state.lemons.forEach((lemon) => {
     if (distance(lemon.x, lemon.y, state.player.x, state.player.y) < PICKUP_RADIUS) {
       state.inventory.lemons += 1
-      state.inventory.score += 1
-      addSplat(state, lemon.x, lemon.y, 42)
+      state.inventory.score += SCORE_PICKUP
+      state.stats.lemonsCollected += 1
+      state.events.push({ type: 'pickupLemon', x: lemon.x, y: lemon.y })
     } else {
       keptLemons.push(lemon)
     }
   })
   state.lemons = keptLemons
 
-  const keptLeaves: Leaf[] = []
+  const keptLeaves: RollingItem[] = []
   state.leaves.forEach((leaf) => {
     if (distance(leaf.x, leaf.y, state.player.x, state.player.y) < PICKUP_RADIUS) {
       state.inventory.leaves += 1
-      state.inventory.score += 1
-      addSplat(state, leaf.x, leaf.y, 34)
+      state.inventory.score += SCORE_PICKUP
+      state.stats.leavesCollected += 1
+      state.events.push({ type: 'pickupLeaf', x: leaf.x, y: leaf.y })
     } else {
       keptLeaves.push(leaf)
     }
@@ -464,62 +459,8 @@ function updateEffects(state: GameState, dt: number) {
   state.effects = state.effects.filter((effect) => effect.ttl > 0)
 }
 
-function dropFromTree(state: GameState, tree: Tree) {
-  const lemonDrops = 4
-  const leafDrops = 3
-
-  for (let index = 0; index < lemonDrops; index += 1) {
-    const angle = (Math.PI * 2 * index) / lemonDrops + Math.random() * 0.3
-    state.lemons.push({
-      id: state.nextId++,
-      x: tree.x + Math.cos(angle) * 30,
-      y: tree.y + Math.sin(angle) * 22,
-      vx: Math.cos(angle) * (120 + Math.random() * 80),
-      vy: Math.sin(angle) * (90 + Math.random() * 70),
-    })
-  }
-
-  for (let index = 0; index < leafDrops; index += 1) {
-    const angle = (Math.PI * 2 * index) / leafDrops + 0.5 + Math.random() * 0.4
-    state.leaves.push({
-      id: state.nextId++,
-      x: tree.x + Math.cos(angle) * 30,
-      y: tree.y + Math.sin(angle) * 24,
-      vx: Math.cos(angle) * (90 + Math.random() * 70),
-      vy: Math.sin(angle) * (90 + Math.random() * 60),
-    })
-  }
-}
-
 function addSplat(state: GameState, x: number, y: number, size: number) {
-  state.effects.push({
-    id: state.nextId++,
-    x,
-    y,
-    ttl: 0.44,
-    maxTtl: 0.44,
-    size,
-  })
-}
-
-function drawSprite(
-  context: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  flip = false,
-) {
-  context.save()
-  if (flip) {
-    context.translate(x, y)
-    context.scale(-1, 1)
-    context.drawImage(image, -width / 2, -height / 2, width, height)
-  } else {
-    context.drawImage(image, x - width / 2, y - height / 2, width, height)
-  }
-  context.restore()
+  state.effects.push({ id: state.nextId++, x, y, ttl: 0.44, maxTtl: 0.44, size })
 }
 
 function distance(ax: number, ay: number, bx: number, by: number) {
