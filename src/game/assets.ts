@@ -8,7 +8,6 @@ export const assetPaths = {
   tree: '/assets/tree.png',
   stump: '/assets/stump.png',
   stand: '/assets/stand.png',
-  crate: '/assets/crate.png',
   smashButton: '/assets/smash-button.png',
   sun: '/assets/sun.png',
 } as const
