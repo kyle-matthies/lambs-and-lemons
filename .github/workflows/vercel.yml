@@ -21,10 +21,10 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6.4.0
         with:
           node-version: 24
           cache: npm
