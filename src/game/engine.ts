@@ -48,7 +48,7 @@ export function createGame(
   phase: GamePhase = 'ready',
 ): GameState {
   const safeWidth = Math.max(width, 320)
-  const safeHeight = Math.max(height, 620)
+  const safeHeight = Math.max(height, 320)
   let nextId = 1
   const id = () => nextId++
 
@@ -133,7 +133,7 @@ export function createGame(
 
 export function resizeGame(state: GameState, width: number, height: number) {
   const nextWidth = Math.max(width, 320)
-  const nextHeight = Math.max(height, 620)
+  const nextHeight = Math.max(height, 320)
   const scaleX = nextWidth / state.width
   const scaleY = nextHeight / state.height
   const scalePoint = <T extends { x: number; y: number }>(point: T) => {
@@ -400,8 +400,9 @@ export function isNearStand(state: GameState) {
 }
 
 function clampPlayer(state: GameState) {
-  // Keep the lamb below the two HUD rows (~200px) so she never hides under them.
-  const top = Math.max(190, state.height * 0.22)
+  // Keep the lamb below the two HUD rows (~190px) on tall portrait screens, but
+  // scale the bound down on short landscape worlds so the stand stays in reach.
+  const top = Math.max(state.height * 0.22, Math.min(190, state.height * 0.35))
   const bottom = state.height - Math.max(118, state.height * 0.13)
   state.player.x = clamp(state.player.x, PLAYER_RADIUS, state.width - PLAYER_RADIUS)
   state.player.y = clamp(state.player.y, top, bottom)

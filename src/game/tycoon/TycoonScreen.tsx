@@ -36,6 +36,7 @@ const EVENT_SOUNDS: Record<TycoonEvent['type'], Parameters<SoundManager['play']>
   cheer: 'cheer',
   dayDone: 'fanfare',
   buy: 'sparkle',
+  nextDay: 'tap',
 }
 
 interface TycoonSnapshot {
@@ -155,7 +156,12 @@ export function TycoonScreen({
       events.forEach((event) => {
         const sfx = EVENT_SOUNDS[event.type]
         if (sfx) soundRef.current.play(sfx)
-        if (event.type === 'cheer' || event.type === 'buy' || event.type === 'dayDone') {
+        if (
+          event.type === 'cheer' ||
+          event.type === 'buy' ||
+          event.type === 'dayDone' ||
+          event.type === 'nextDay'
+        ) {
           onSaveRef.current({
             purse: state.purse,
             day: state.day,

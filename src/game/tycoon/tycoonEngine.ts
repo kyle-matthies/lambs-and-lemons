@@ -28,6 +28,7 @@ export type TycoonEvent =
   | { type: 'cheer'; tip: number }
   | { type: 'dayDone' }
   | { type: 'buy' }
+  | { type: 'nextDay' }
 
 export interface TycoonState {
   day: number
@@ -258,6 +259,7 @@ export function startNextDay(state: TycoonState, rng: Rng = Math.random) {
   state.happyT = 0
   state.earnedToday = 0
   state.cupsToday = 0
+  state.events.push({ type: 'nextDay' })
 }
 
 export function changeGivenTotal(state: TycoonState) {
