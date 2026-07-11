@@ -94,6 +94,22 @@
   white-space: nowrap;
 }
 
+.mute-toggle {
+  position: absolute;
+  right: 11px;
+  top: calc(env(safe-area-inset-top) + 132px);
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 2px solid rgba(99, 74, 29, 0.2);
+  border-radius: 8px;
+  color: #4a2a12;
+  background: rgba(255, 250, 220, 0.86);
+  box-shadow: 0 3px 0 rgba(126, 100, 34, 0.16);
+  font-size: 0.72rem;
+  font-weight: 950;
+  pointer-events: auto;
+}
+
 .controls-layer {
   position: absolute;
   inset: auto 0 0;
@@ -164,7 +180,6 @@
 }
 
 .smash-control,
-.sell-control,
 .start-button,
 .quiet-button,
 .round-picker button {
@@ -195,9 +210,9 @@
 }
 
 .smash-control:active,
-.sell-control:active,
 .start-button:active,
-.round-picker button:active {
+.round-picker button:active,
+.mute-toggle:active {
   transform: translateY(2px) scale(0.99);
 }
 
@@ -213,29 +228,6 @@
   font-size: 1rem;
   line-height: 1;
   text-shadow: 0 2px 0 rgba(255, 255, 255, 0.74);
-}
-
-.sell-control {
-  position: absolute;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom) + 34px);
-  width: 82px;
-  height: 58px;
-  transform: translateX(-50%);
-  border-radius: 8px;
-  border: 3px solid rgba(255, 255, 255, 0.9);
-  color: #ffffff;
-  background: linear-gradient(180deg, #51d940, #169735);
-  box-shadow:
-    inset 0 -5px 0 rgba(10, 101, 37, 0.22),
-    0 7px 20px rgba(18, 93, 25, 0.24);
-  pointer-events: auto;
-}
-
-.sell-control:disabled {
-  opacity: 0.48;
-  filter: grayscale(0.25);
-  cursor: default;
 }
 
 .game-overlay {
@@ -358,15 +350,43 @@
   color: #1b7b2c;
 }
 
-.score-stack {
+.cups-result {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  justify-items: center;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255, 230, 106, 0.38);
+}
+
+.cups-result img {
+  width: 72px;
+  height: 62px;
+  object-fit: contain;
+}
+
+.cups-result strong {
+  color: #5b3415;
+  font-size: 3.1rem;
+  line-height: 0.9;
+}
+
+.cups-result span {
+  color: #23712d;
+  font-size: 0.84rem;
+  font-weight: 950;
+}
+
+.result-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
-.score-stack div {
-  min-height: 74px;
+.result-grid div {
+  min-height: 58px;
   display: grid;
   align-content: center;
   gap: 5px;
@@ -374,14 +394,14 @@
   background: rgba(255, 230, 106, 0.38);
 }
 
-.score-stack span {
+.result-grid span {
   font-size: 0.72rem;
   font-weight: 900;
   color: #23712d;
 }
 
-.score-stack strong {
-  font-size: 1.65rem;
+.result-grid strong {
+  font-size: 1.28rem;
   line-height: 1;
   color: #5b3415;
 }
@@ -445,10 +465,11 @@ button:focus-visible,
     height: 61px;
   }
 
-  .sell-control {
-    bottom: calc(env(safe-area-inset-bottom) + 27px);
-    width: 72px;
-    height: 52px;
+  .mute-toggle {
+    top: calc(env(safe-area-inset-top) + 114px);
+    min-height: 27px;
+    padding: 4px 8px;
+    font-size: 0.63rem;
   }
 
   .start-panel,

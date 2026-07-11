@@ -1,66 +1,77 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { assetPaths, loadGameAssets, type GameAssets } from './assets'
+import { GameAudio } from './audio'
+import { DEFAULT_ROUND_MINUTES, GAME_CONFIG, ROUND_OPTIONS } from './config'
 import {
   createGame,
+  createRoundResult,
+  drainEvents,
   drawGame,
   resizeGame,
-  sellLemonade,
   swingHammer,
   takeSnapshot,
   updateGame,
-  type BestRound,
   type GameInput,
   type GameSnapshot,
   type GameState,
   type RoundMinutes,
+  type RoundResult,
 } from './engine'
 
-type BestByRound = Partial<Record<RoundMinutes, BestRound>>
-
-const ROUND_OPTIONS: RoundMinutes[] = [1, 2, 3, 4, 5]
-const STORAGE_KEY = 'lambs-and-lemons-best'
 const EMPTY_INPUT: GameInput = { active: false, x: 0, y: 0 }
+const MUTE_KEY = 'lambs-and-lemons-muted'
 
 const emptySnapshot: GameSnapshot = {
   phase: 'ready',
-  roundMinutes: 2,
-  timeLeft: 120,
+  roundMinutes: DEFAULT_ROUND_MINUTES,
+  timeLeft: DEFAULT_ROUND_MINUTES * 60,
   score: 0,
-  sold: 0,
-  lemons: 0,
-  juice: 0,
+  cupsSold: 0,
+  carriedLemons: 0,
   leaves: 0,
+  lemonsSmashed: 0,
+  lemonsPickedUp: 0,
+  leavesPickedUp: 0,
+  treeHits: 0,
   nearStand: false,
-  canSell: false,
+  brewing: false,
+  brewProgress: 0,
 }
 
 export function GameCanvas() {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const joystickRef = useRef<HTMLDivElement | null>(null)
   const assetsRef = useRef<GameAssets | null>(null)
   const gameRef = useRef<GameState | null>(null)
-  const inputRef = useRef<GameInput>(EMPTY_INPUT)
+  const joystickInputRef = useRef<GameInput>(EMPTY_INPUT)
+  const keysRef = useRef<Record<string, boolean>>({})
   const joystickPointerRef = useRef<number | null>(null)
   const lastPhaseRef = useRef(emptySnapshot.phase)
-  const bestRef = useRef<BestByRound>({})
+  const audioRef = useRef<GameAudio | null>(null)
 
   const [assetsReady, setAssetsReady] = useState(false)
-  const [roundMinutes, setRoundMinutes] = useState<RoundMinutes>(2)
+  const [roundMinutes, setRoundMinutes] = useState<RoundMinutes>(DEFAULT_ROUND_MINUTES)
   const [snapshot, setSnapshot] = useState<GameSnapshot>(emptySnapshot)
-  const [stick, setStick] = useState({ active: false, x: 0, y: 0 })
-  const [bestByRound, setBestByRound] = useState<BestByRound>({})
+  const [stick, setStick] = useState({ x: 0, y: 0 })
+  const [leaderboard, setLeaderboard] = useState<RoundResult[]>([])
+  const [muted, setMuted] = useState(() => readMuted())
 
   const bestForRound = useMemo(
-    () => bestByRound[snapshot.roundMinutes] ?? { sold: 0, score: 0 },
-    [bestByRound, snapshot.roundMinutes],
+    () => getBestForRound(leaderboard, snapshot.roundMinutes),
+    [leaderboard, snapshot.roundMinutes],
   )
 
   useEffect(() => {
-    const loaded = readBestScores()
-    bestRef.current = loaded
-    setBestByRound(loaded)
+    audioRef.current = new GameAudio(readMuted())
+    setLeaderboard(readLeaderboard())
   }, [])
+
+  useEffect(() => {
+    audioRef.current?.setMuted(muted)
+    window.localStorage.setItem(MUTE_KEY, muted ? 'true' : 'false')
+  }, [muted])
 
   useEffect(() => {
     let mounted = true
@@ -127,18 +138,14 @@ export function GameCanvas() {
       lastTime = now
 
       if (state && assets && context) {
-        updateGame(state, inputRef.current, dt)
+        updateGame(state, getActiveInput(joystickInputRef.current, keysRef.current), dt)
+        drainEvents(state).forEach((event) => audioRef.current?.play(event))
         if (state.phase === 'ended' && lastPhaseRef.current !== 'ended') {
-          const updated = recordBestRound(
-            bestRef.current,
-            state.roundMinutes,
-            state.inventory.sold,
-            state.inventory.score,
-          )
-          bestRef.current = updated
-          setBestByRound(updated)
-          inputRef.current = EMPTY_INPUT
-          setStick({ active: false, x: 0, y: 0 })
+          const result = createRoundResult(state)
+          const updated = addResult(result)
+          setLeaderboard(updated)
+          joystickInputRef.current = EMPTY_INPUT
+          setStick({ x: 0, y: 0 })
         }
         lastPhaseRef.current = state.phase
         drawGame(context, state, assets)
@@ -155,16 +162,85 @@ export function GameCanvas() {
     return () => cancelAnimationFrame(frame)
   }, [assetsReady])
 
-  const startRound = () => {
+  useEffect(() => {
+    const active = snapshot.phase === 'playing'
+    if (!active) return
+
+    const body = document.body
+    const html = document.documentElement
+    const previous = {
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyWidth: body.style.width,
+      bodyHeight: body.style.height,
+      htmlOverscroll: html.style.overscrollBehavior,
+    }
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.width = '100%'
+    body.style.height = '100%'
+    html.style.overscrollBehavior = 'none'
+
+    return () => {
+      body.style.overflow = previous.bodyOverflow
+      body.style.position = previous.bodyPosition
+      body.style.width = previous.bodyWidth
+      body.style.height = previous.bodyHeight
+      html.style.overscrollBehavior = previous.htmlOverscroll
+    }
+  }, [snapshot.phase])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      keysRef.current[key] = true
+      if (key === ' ') {
+        event.preventDefault()
+        handleSwing()
+      }
+    }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      keysRef.current[event.key.toLowerCase()] = false
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  })
+
+  useEffect(() => {
+    const handleMove = (event: globalThis.PointerEvent) => {
+      if (joystickPointerRef.current !== event.pointerId) return
+      event.preventDefault()
+      updateJoystick(event.clientX, event.clientY)
+    }
+    const handleUp = (event: globalThis.PointerEvent) => {
+      if (joystickPointerRef.current !== event.pointerId) return
+      releaseJoystick()
+    }
+
+    window.addEventListener('pointermove', handleMove, { passive: false })
+    window.addEventListener('pointerup', handleUp)
+    window.addEventListener('pointercancel', handleUp)
+    return () => {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+      window.removeEventListener('pointercancel', handleUp)
+    }
+  }, [])
+
+  const startRound = async () => {
+    await audioRef.current?.unlock()
     const stage = stageRef.current
     const rect = stage?.getBoundingClientRect()
-    const width = rect?.width ?? 390
-    const height = rect?.height ?? 844
-    const game = createGame(width, height, roundMinutes, 'playing')
+    const game = createGame(rect?.width ?? 390, rect?.height ?? 844, roundMinutes, 'playing')
     gameRef.current = game
     lastPhaseRef.current = 'playing'
-    inputRef.current = EMPTY_INPUT
-    setStick({ active: false, x: 0, y: 0 })
+    joystickInputRef.current = EMPTY_INPUT
+    setStick({ x: 0, y: 0 })
     setSnapshot(takeSnapshot(game))
   }
 
@@ -184,57 +260,57 @@ export function GameCanvas() {
     const game = createGame(rect?.width ?? 390, rect?.height ?? 844, roundMinutes, 'ready')
     gameRef.current = game
     lastPhaseRef.current = 'ready'
-    inputRef.current = EMPTY_INPUT
-    setStick({ active: false, x: 0, y: 0 })
+    joystickInputRef.current = EMPTY_INPUT
+    setStick({ x: 0, y: 0 })
     setSnapshot(takeSnapshot(game))
   }
 
-  const handleSwing = () => {
+  const handleSwing = useCallback(() => {
     const game = gameRef.current
     if (!game) return
+    void audioRef.current?.unlock()
     swingHammer(game)
+    drainEvents(game).forEach((event) => audioRef.current?.play(event))
     setSnapshot(takeSnapshot(game))
-  }
+  }, [])
 
-  const handleSell = () => {
-    const game = gameRef.current
-    if (!game) return
-    sellLemonade(game)
-    setSnapshot(takeSnapshot(game))
-  }
-
-  const updateJoystick = (event: PointerEvent<HTMLDivElement>) => {
-    const target = event.currentTarget
-    const rect = target.getBoundingClientRect()
+  const updateJoystick = (clientX: number, clientY: number) => {
+    const base = joystickRef.current
+    if (!base) return
+    const rect = base.getBoundingClientRect()
     const centerX = rect.left + rect.width / 2
     const centerY = rect.top + rect.height / 2
-    const rawX = event.clientX - centerX
-    const rawY = event.clientY - centerY
-    const max = rect.width * 0.32
+    const rawX = clientX - centerX
+    const rawY = clientY - centerY
+    const max = rect.width / 2
     const length = Math.hypot(rawX, rawY)
     const ratio = length > max ? max / length : 1
     const visualX = rawX * ratio
     const visualY = rawY * ratio
-    const inputLength = Math.max(1, max)
-    inputRef.current = {
+    joystickInputRef.current = {
       active: true,
-      x: visualX / inputLength,
-      y: visualY / inputLength,
+      x: visualX / max,
+      y: visualY / max,
     }
-    setStick({ active: true, x: visualX, y: visualY })
+    setStick({ x: visualX, y: visualY })
   }
 
   const releaseJoystick = () => {
     joystickPointerRef.current = null
-    inputRef.current = EMPTY_INPUT
-    setStick({ active: false, x: 0, y: 0 })
+    joystickInputRef.current = EMPTY_INPUT
+    setStick({ x: 0, y: 0 })
   }
 
   return (
     <main className="game-shell">
       <section className="phone-stage" ref={stageRef} aria-label="Lambs and Lemons game">
         <canvas className="game-canvas" ref={canvasRef} aria-hidden="true" />
-        <GameHud snapshot={snapshot} best={bestForRound} />
+        <GameHud
+          snapshot={snapshot}
+          best={bestForRound}
+          muted={muted}
+          onToggleMute={() => setMuted((current) => !current)}
+        />
 
         {!assetsReady && <div className="loading-panel">Loading</div>}
 
@@ -258,17 +334,19 @@ export function GameCanvas() {
 
         <div className="controls-layer" aria-hidden={snapshot.phase !== 'playing'}>
           <div
+            ref={joystickRef}
             className="joystick"
-            onPointerDown={(event) => {
+            onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
+              event.preventDefault()
               joystickPointerRef.current = event.pointerId
-              event.currentTarget.setPointerCapture(event.pointerId)
-              updateJoystick(event)
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId)
+              } catch {
+                // Some older mobile browsers do not support pointer capture.
+              }
+              updateJoystick(event.clientX, event.clientY)
             }}
-            onPointerMove={(event) => {
-              if (joystickPointerRef.current === event.pointerId) updateJoystick(event)
-            }}
-            onPointerUp={releaseJoystick}
-            onPointerCancel={releaseJoystick}
+            onContextMenu={(event) => event.preventDefault()}
             role="application"
             aria-label="Move lamb"
           >
@@ -279,15 +357,14 @@ export function GameCanvas() {
           </div>
 
           <button
-            className="sell-control"
+            className="smash-control"
             type="button"
-            disabled={!snapshot.canSell}
-            onClick={handleSell}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              handleSwing()
+            }}
+            onContextMenu={(event) => event.preventDefault()}
           >
-            Sell
-          </button>
-
-          <button className="smash-control" type="button" onClick={handleSwing}>
             <img src={assetPaths.smashButton} alt="" />
             <span>Smash</span>
           </button>
@@ -297,19 +374,32 @@ export function GameCanvas() {
   )
 }
 
-function GameHud({ snapshot, best }: { snapshot: GameSnapshot; best: BestRound }) {
+function GameHud({
+  snapshot,
+  best,
+  muted,
+  onToggleMute,
+}: {
+  snapshot: GameSnapshot
+  best: RoundResult | null
+  muted: boolean
+  onToggleMute: () => void
+}) {
   return (
     <div className="hud">
       <div className="hud-row primary">
         <HudMetric label="Time" value={formatTime(snapshot.timeLeft)} />
-        <HudMetric label="Sold" value={`${snapshot.sold}`} detail={`Best ${best.sold}`} />
-        <HudMetric label="Points" value={`${snapshot.score}`} detail={`Best ${best.score}`} />
+        <HudMetric label="Cups" value={`${snapshot.cupsSold}`} detail={`Best ${best?.cupsSold ?? 0}`} />
+        <HudMetric label="Points" value={`${snapshot.score}`} detail={`Best ${best?.score ?? 0}`} />
       </div>
       <div className="hud-row inventory">
-        <HudMetric image={assetPaths.lemon} label="Lemons" value={`${snapshot.lemons}`} />
-        <HudMetric image={assetPaths.splat} label="Juice" value={`${snapshot.juice}`} />
+        <HudMetric image={assetPaths.lemon} label="Carry" value={`${snapshot.carriedLemons}`} />
         <HudMetric image={assetPaths.leaf} label="Leaves" value={`${snapshot.leaves}`} />
+        <HudMetric label="Tree" value={`${snapshot.treeHits}`} detail="hits" />
       </div>
+      <button className="mute-toggle" type="button" onClick={onToggleMute}>
+        {muted ? 'Sound Off' : 'Sound On'}
+      </button>
     </div>
   )
 }
@@ -342,9 +432,9 @@ function StartOverlay({
   onStart,
 }: {
   roundMinutes: RoundMinutes
-  best: BestRound
+  best: RoundResult | null
   onRoundChange: (minutes: RoundMinutes) => void
-  onStart: () => void
+  onStart: () => void | Promise<void>
 }) {
   return (
     <div className="game-overlay">
@@ -364,12 +454,12 @@ function StartOverlay({
           ))}
         </div>
         <button className="start-button" type="button" onClick={onStart}>
-          Start
+          Start Smashing
         </button>
         <div className="best-strip">
           <span>{roundMinutes} min</span>
-          <strong>{best.sold} sold</strong>
-          <span>{best.score} points</span>
+          <strong>{best?.cupsSold ?? 0} cups</strong>
+          <span>{best?.score ?? 0} points</span>
         </div>
       </div>
     </div>
@@ -383,30 +473,29 @@ function EndOverlay({
   onRounds,
 }: {
   snapshot: GameSnapshot
-  best: BestRound
-  onPlayAgain: () => void
+  best: RoundResult | null
+  onPlayAgain: () => void | Promise<void>
   onRounds: () => void
 }) {
   return (
     <div className="game-overlay">
       <div className="end-panel">
-        <h2>Round over</h2>
-        <div className="score-stack">
-          <div>
-            <span>Sold</span>
-            <strong>{snapshot.sold}</strong>
-          </div>
-          <div>
-            <span>Points</span>
-            <strong>{snapshot.score}</strong>
-          </div>
-          <div>
-            <span>Best</span>
-            <strong>{best.sold}</strong>
-          </div>
+        <h2>Time's Up</h2>
+        <div className="cups-result">
+          <img src={assetPaths.stand} alt="" />
+          <strong>{snapshot.cupsSold}</strong>
+          <span>cups sold</span>
+        </div>
+        <div className="result-grid">
+          <ResultStat label="Points" value={snapshot.score} />
+          <ResultStat label="Best cups" value={best?.cupsSold ?? 0} />
+          <ResultStat label="Smashed" value={snapshot.lemonsSmashed} />
+          <ResultStat label="Picked" value={snapshot.lemonsPickedUp} />
+          <ResultStat label="Leaves" value={snapshot.leavesPickedUp} />
+          <ResultStat label="Tree hits" value={snapshot.treeHits} />
         </div>
         <button className="start-button" type="button" onClick={onPlayAgain}>
-          Play again
+          Play Again
         </button>
         <button className="quiet-button" type="button" onClick={onRounds}>
           Rounds
@@ -416,6 +505,31 @@ function EndOverlay({
   )
 }
 
+function ResultStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+}
+
+function getActiveInput(joystick: GameInput, keys: Record<string, boolean>): GameInput {
+  let x = 0
+  let y = 0
+  if (keys.arrowleft || keys.a) x -= 1
+  if (keys.arrowright || keys.d) x += 1
+  if (keys.arrowup || keys.w) y -= 1
+  if (keys.arrowdown || keys.s) y += 1
+
+  if (x !== 0 || y !== 0) {
+    const length = Math.hypot(x, y) || 1
+    return { active: true, x: x / length, y: y / length }
+  }
+
+  return joystick
+}
+
 function formatTime(totalSeconds: number) {
   const seconds = Math.max(0, Math.ceil(totalSeconds))
   const minutes = Math.floor(seconds / 60)
@@ -423,30 +537,41 @@ function formatTime(totalSeconds: number) {
   return `${minutes}:${remainder.toString().padStart(2, '0')}`
 }
 
-function readBestScores(): BestByRound {
+function readMuted() {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
-    return JSON.parse(raw) as BestByRound
+    return window.localStorage.getItem(MUTE_KEY) === 'true'
   } catch {
-    return {}
+    return false
   }
 }
 
-function recordBestRound(
-  existing: BestByRound,
-  roundMinutes: RoundMinutes,
-  sold: number,
-  score: number,
-) {
-  const current = existing[roundMinutes] ?? { sold: 0, score: 0 }
-  const shouldReplace = sold > current.sold || (sold === current.sold && score > current.score)
-  if (!shouldReplace) return existing
-
-  const updated = {
-    ...existing,
-    [roundMinutes]: { sold, score },
+function readLeaderboard(): RoundResult[] {
+  try {
+    const raw = window.localStorage.getItem(GAME_CONFIG.leaderboardKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as RoundResult[]) : []
+  } catch {
+    return []
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+}
+
+function addResult(result: RoundResult) {
+  const updated = [...readLeaderboard(), result]
+    .sort((a, b) => b.cupsSold - a.cupsSold || b.score - a.score)
+    .slice(0, GAME_CONFIG.maxLeaderboardEntries)
+  try {
+    window.localStorage.setItem(GAME_CONFIG.leaderboardKey, JSON.stringify(updated))
+  } catch {
+    // Private browsing can reject localStorage writes; gameplay should continue.
+  }
   return updated
+}
+
+function getBestForRound(leaderboard: RoundResult[], roundMinutes: RoundMinutes) {
+  return (
+    leaderboard
+      .filter((result) => result.roundMinutes === roundMinutes)
+      .sort((a, b) => b.cupsSold - a.cupsSold || b.score - a.score)[0] ?? null
+  )
 }
