@@ -1,0 +1,14 @@
+{
+  "name": "Lammy's Lemonade Smash",
+  "short_name": "Lammy",
+  "description": "Smash lemons, sell lemonade! A quirky lamb-with-a-mallet game designed by a 6-year-old game director.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#86df53",
+  "theme_color": "#86df53",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
