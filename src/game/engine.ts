@@ -1,18 +1,34 @@
+import { clamp, damp, dampAngle, distance2D } from '../core/math'
+import { mulberry32, randRange, type Rng } from '../core/rng'
 import {
+  CUP_CAPACITY,
+  FLOCK_BREW_BONUS,
+  FLOCK_BREW_BONUS_CAP,
+  FLOCK_PICKUP_BONUS,
+  FLOCK_PICKUP_BONUS_CAP,
+  SCORE_BREW,
+  SCORE_VALLEY_WOKE,
   BREW_TIME,
   BURST_ON_BREAK,
   BURST_PER_HIT,
   COMBO_MIN_LEVEL,
   COMBO_WINDOW,
   COUNTDOWN_TICKS_FROM,
+  FOOTSTEP_STRIDE,
+  GRAVITY,
+  ITEM_DRAG_LAMBDA,
+  ITEM_REST_SPEED,
+  ITEM_RESTITUTION,
   LEAF_SPAWN_INTERVAL,
   LEMON_PARTS_PER_CUP,
   LEMON_SPAWN_INTERVAL,
   MAX_GROUND_LEAVES,
   MAX_GROUND_LEMONS,
   PICKUP_RADIUS,
+  PLAYER_ACCEL_LAMBDA,
   PLAYER_RADIUS,
   PLAYER_SPEED,
+  PLAYER_TURN_LAMBDA,
   SCORE_COMBO_BONUS,
   SCORE_CUP,
   SCORE_PICKUP,
@@ -25,92 +41,94 @@ import {
   SWING_COOLDOWN,
   SWING_REACH,
   SWING_TIME,
+  TREE_COUNT,
   TREE_HEALTH,
   TREE_HIT_RADIUS,
-  TREE_REGROW_POP,
+  TREE_REGROW_TIME,
   TREE_RESPAWN_TIME,
   TREE_WOBBLE_TIME,
+  ZEST_RADIUS_CUP,
+  ZEST_RADIUS_SMASH,
+  ZEST_RADIUS_TREE_BREAK,
+  ZEST_RADIUS_TREE_HIT,
 } from './constants'
+import { bloomCoverage, createBloomField, floodBloom, stampBloom } from './bloom'
+import { canServeNow, countLost, serveNearestCritter, spawnCritters, updateCritters } from './critters'
 import type {
+  Critter,
   GameInput,
   GamePhase,
   GameSnapshot,
   GameState,
-  RollingItem,
+  GroundItem,
   RoundMinutes,
   Tree,
 } from './types'
+import { constrainToMeadow, createWorld, generateGroveLayout, isWalkable, type World } from './world'
+
+const scratchPoint = { x: 0, z: 0 }
 
 export function createGame(
-  width: number,
-  height: number,
   roundMinutes: RoundMinutes,
   phase: GamePhase = 'ready',
+  seed = 20260802,
 ): GameState {
-  const safeWidth = Math.max(width, 320)
-  const safeHeight = Math.max(height, 320)
+  const world = createWorld(seed)
+  const layout = generateGroveLayout(world, TREE_COUNT)
+  const rng = mulberry32(seed ^ 0x27d4eb2f)
   let nextId = 1
-  const id = () => nextId++
 
-  const lemons: RollingItem[] = [
-    [0.36, 0.42],
-    [0.61, 0.45],
-    [0.47, 0.56],
-    [0.77, 0.58],
-    [0.25, 0.63],
-    [0.39, 0.74],
-    [0.68, 0.76],
-    [0.55, 0.67],
-  ].map(([x, y]) => ({ id: id(), x: x * safeWidth, y: y * safeHeight, vx: 0, vy: 0 }))
-
-  const leaves: RollingItem[] = [
-    [0.31, 0.5],
-    [0.53, 0.5],
-    [0.73, 0.48],
-    [0.2, 0.55],
-    [0.42, 0.64],
-    [0.59, 0.61],
-    [0.75, 0.68],
-    [0.28, 0.75],
-  ].map(([x, y]) => ({ id: id(), x: x * safeWidth, y: y * safeHeight, vx: 0, vy: 0 }))
-
-  const trees: Tree[] = [
-    [0.17, 0.29],
-    [0.82, 0.35],
-    [0.18, 0.72],
-    [0.84, 0.75],
-    [0.52, 0.31],
-  ].map(([x, y]) => ({
-    id: id(),
-    x: x * safeWidth,
-    y: y * safeHeight,
+  const trees: Tree[] = layout.trees.map((spot) => ({
+    id: nextId++,
+    x: spot.x,
+    y: spot.y,
+    z: spot.z,
+    rotation: spot.rotation,
+    scale: spot.scale,
+    variant: spot.variant,
     health: TREE_HEALTH,
-    stage: 'full' as const,
+    stage: 'full',
     respawnTimer: 0,
     regrowTimer: 0,
     wobbleTimer: 0,
+    wobbleAngle: 0,
   }))
 
-  return {
-    width: safeWidth,
-    height: safeHeight,
+  const state: GameState = {
+    world,
+    layout,
     phase,
     roundMinutes,
     timeLeft: roundMinutes * 60,
+    elapsed: 0,
     player: {
-      x: safeWidth * 0.5,
-      y: safeHeight * 0.68,
-      facingX: 0,
-      facingY: -1,
+      x: 0,
+      y: world.heightAt(0, 0),
+      z: 2,
+      vx: 0,
+      vz: 0,
+      facing: 0,
+      speed: 0,
       swingTimer: 0,
       swingCooldown: 0,
+      gait: 0,
+      footstepPhase: 0,
     },
-    stand: { x: safeWidth * 0.73, y: safeHeight * 0.2 },
+    stand: {
+      x: layout.stand.x,
+      y: layout.stand.y,
+      z: layout.stand.z,
+      rotation: layout.standRotation,
+    },
     trees,
-    lemons,
-    leaves,
-    effects: [],
-    inventory: { lemons: 0, juice: 0, leaves: 0, sold: 0, score: 0 },
+    lemons: [],
+    leaves: [],
+    critters: spawnCritters(world, seed),
+    flockSize: 0,
+    bloomField: createBloomField(),
+    bloomCoverage: 0,
+    outcome: null,
+    inventory: { lemons: 0, juice: 0, leaves: 0, cups: 0, sparkleCups: 0, sold: 0, score: 0 },
     stats: {
       lemonsSmashed: 0,
       treeHits: 0,
@@ -119,6 +137,7 @@ export function createGame(
       leavesCollected: 0,
       cupsSold: 0,
       sparkleCups: 0,
+      crittersFreed: 0,
     },
     brewProgress: 0,
     comboCount: 0,
@@ -129,38 +148,62 @@ export function createGame(
     events: [],
     nextId,
   }
-}
 
-export function resizeGame(state: GameState, width: number, height: number) {
-  const nextWidth = Math.max(width, 320)
-  const nextHeight = Math.max(height, 320)
-  const scaleX = nextWidth / state.width
-  const scaleY = nextHeight / state.height
-  const scalePoint = <T extends { x: number; y: number }>(point: T) => {
-    point.x *= scaleX
-    point.y *= scaleY
+  // The stand keeps its own small patch of colour and Lammy stands in a scrap of
+  // living grass — the valley is fading, not dead. Deliberately tight: a wide
+  // pre-painted circle would swallow the first few smashes and rob the player of
+  // the one piece of feedback the whole design rests on.
+  stampBloom(state.bloomField, state.stand.x, state.stand.z, 9, 0.9)
+  stampBloom(state.bloomField, state.player.x, state.player.z, 5, 0.55)
+
+  // A ring of fruit within a couple of strides of the start, so the very first
+  // swing always connects. Nothing kills an opening like whiffing at empty grass.
+  for (let index = 0; index < 5; index += 1) {
+    const angle = (index / 5) * Math.PI * 2 + 0.4
+    const distance = randRange(rng, 2.6, 5.4)
+    const x = state.player.x + Math.cos(angle) * distance
+    const z = state.player.z + Math.sin(angle) * distance
+    state.lemons.push(makeItem(state, x, world.heightAt(x, z) + 0.25, z, 0, 0, 0, rng))
   }
 
-  scalePoint(state.player)
-  scalePoint(state.stand)
-  state.trees.forEach(scalePoint)
-  state.lemons.forEach(scalePoint)
-  state.leaves.forEach(scalePoint)
-  state.effects.forEach(scalePoint)
-  state.width = nextWidth
-  state.height = nextHeight
-  clampPlayer(state)
+  // Seed the wider meadow so the opening shot has somewhere to run to.
+  for (let index = 0; index < 10; index += 1) state.lemons.push(spawnLooseItem(state, rng))
+  for (let index = 0; index < 6; index += 1) state.leaves.push(spawnLooseItem(state, rng))
+  state.player.y = world.heightAt(state.player.x, state.player.z)
+  // Self-consistent from the first frame: the HUD snapshots this before the
+  // update loop has run even once.
+  state.bloomCoverage = bloomCoverage(state.bloomField, world.playRadius)
+
+  return state
 }
 
 export function updateGame(state: GameState, input: GameInput, dt: number) {
   const player = state.player
   player.swingTimer = Math.max(0, player.swingTimer - dt)
   player.swingCooldown = Math.max(0, player.swingCooldown - dt)
+
   updateTrees(state, dt)
-  updateEffects(state, dt)
+  updateItems(state, state.lemons, dt)
+  updateItems(state, state.leaves, dt)
 
-  if (state.phase !== 'playing') return
+  if (state.phase === 'ready') {
+    // Before the round starts you can still stroll around, and the menu's
+    // backdrop drives the same path with a scripted input. Nothing is scored and
+    // the clock hasn't started.
+    state.elapsed += dt
+    updatePlayer(state, input, dt)
+    updateCritters(state, dt)
+    state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+    return
+  }
 
+  if (state.phase !== 'playing') {
+    player.speed = damp(player.speed, 0, 8, dt)
+    state.elapsed += dt
+    return
+  }
+
+  state.elapsed += dt
   state.timeLeft = Math.max(0, state.timeLeft - dt)
   const wholeSecond = Math.ceil(state.timeLeft)
   if (wholeSecond !== state.lastWholeSecond) {
@@ -170,29 +213,118 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
     }
   }
   if (state.timeLeft <= 0) {
-    state.phase = 'ended'
-    state.brewProgress = 0
-    state.events.push({ type: 'timeUp' })
+    endRound(state, 'sunset')
     return
   }
 
-  if (input.active) {
-    player.x += input.x * PLAYER_SPEED * dt
-    player.y += input.y * PLAYER_SPEED * dt
-    if (Math.abs(input.x) + Math.abs(input.y) > 0.08) {
-      player.facingX = input.x
-      player.facingY = input.y
-    }
-    clampPlayer(state)
-  }
+  updatePlayer(state, input, dt)
+  updateCritters(state, dt)
 
   state.comboTimer = Math.max(0, state.comboTimer - dt)
   if (state.comboTimer === 0) state.comboCount = 0
 
   updateSpawning(state, dt)
-  updateRollingItems(state, dt)
   collectItems(state)
   updateBrewing(state, dt)
+  state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+}
+
+/**
+ * Jump a round straight to its end card. Exported for the `?over=` debug link:
+ * the ending is the emotional payoff of the whole design, and it is otherwise
+ * only reachable by playing a full round, which makes it nearly impossible to
+ * inspect or screenshot.
+ */
+export function finishRound(state: GameState, outcome: 'sunset' | 'valleyWoke') {
+  if (outcome === 'valleyWoke') {
+    for (const critter of state.critters) {
+      if (critter.state === 'lost') {
+        critter.state = 'follower'
+        state.flockSize += 1
+        state.stats.crittersFreed += 1
+        state.inventory.sold += 1
+        state.inventory.score += SCORE_CUP
+      }
+    }
+  }
+  state.timeLeft = 0
+  endRound(state, outcome)
+}
+
+function endRound(state: GameState, outcome: GameState['outcome']) {
+  state.phase = 'ended'
+  state.outcome = outcome
+  state.brewProgress = 0
+  // The summary card reports this, and the update loop stops running the moment
+  // the phase flips — so it has to be refreshed here or it reads a stale zero.
+  state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+  if (outcome === 'valleyWoke') {
+    state.inventory.score += SCORE_VALLEY_WOKE
+    // The last cup tips it over: colour rushes out to every corner at once.
+    floodBloom(state.bloomField)
+    state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+    state.events.push({
+      type: 'valleyWoke',
+      x: state.player.x,
+      y: state.player.y,
+      z: state.player.z,
+    })
+  } else {
+    state.events.push({ type: 'timeUp' })
+  }
+}
+
+/** Each freed friend widens Lammy's reach a little. */
+function pickupRadius(state: GameState) {
+  return (
+    PICKUP_RADIUS + Math.min(FLOCK_PICKUP_BONUS_CAP, state.flockSize * FLOCK_PICKUP_BONUS)
+  )
+}
+
+/** ...and lends a hoof at the stand. */
+function brewDuration(state: GameState) {
+  const help = Math.min(FLOCK_BREW_BONUS_CAP, state.flockSize * FLOCK_BREW_BONUS)
+  return BREW_TIME * (1 - help)
+}
+
+function updatePlayer(state: GameState, input: GameInput, dt: number) {
+  const player = state.player
+  const world = state.world
+
+  // Screen-space stick → world XZ. The camera looks down -Z, so "up" is -Z.
+  const targetVx = input.active ? input.x * PLAYER_SPEED : 0
+  const targetVz = input.active ? input.y * PLAYER_SPEED : 0
+  player.vx = damp(player.vx, targetVx, PLAYER_ACCEL_LAMBDA, dt)
+  player.vz = damp(player.vz, targetVz, PLAYER_ACCEL_LAMBDA, dt)
+
+  const nextX = player.x + player.vx * dt
+  const nextZ = player.z + player.vz * dt
+  constrainToMeadow(world, nextX, nextZ, PLAYER_RADIUS, scratchPoint)
+  // Bleed off velocity we didn't get to use so we don't grind against the edge.
+  if (Math.abs(scratchPoint.x - nextX) > 1e-4) player.vx *= 0.3
+  if (Math.abs(scratchPoint.z - nextZ) > 1e-4) player.vz *= 0.3
+  player.x = scratchPoint.x
+  player.z = scratchPoint.z
+  player.y = world.heightAt(player.x, player.z)
+
+  player.speed = Math.hypot(player.vx, player.vz)
+  if (player.speed > 0.35) {
+    player.facing = dampAngle(
+      player.facing,
+      Math.atan2(player.vx, player.vz),
+      PLAYER_TURN_LAMBDA,
+      dt,
+    )
+  }
+
+  // Gait advances with distance travelled, so the legs never skate.
+  const stride = player.speed * dt
+  player.gait += stride
+  player.footstepPhase += stride
+  if (player.footstepPhase >= FOOTSTEP_STRIDE) {
+    player.footstepPhase -= FOOTSTEP_STRIDE
+    state.events.push({ type: 'footstep', x: player.x, y: player.y, z: player.z })
+  }
 }
 
 export function swingHammer(state: GameState) {
@@ -201,55 +333,61 @@ export function swingHammer(state: GameState) {
   const player = state.player
   player.swingTimer = SWING_TIME
   player.swingCooldown = SWING_COOLDOWN
-  const length = Math.hypot(player.facingX, player.facingY) || 1
-  const aimX = player.facingX / length
-  const aimY = player.facingY / length
-  const hitX = player.x + aimX * SWING_REACH
-  const hitY = player.y + aimY * SWING_REACH
+
+  const hitX = player.x + Math.sin(player.facing) * SWING_REACH
+  const hitZ = player.z + Math.cos(player.facing) * SWING_REACH
   let hitSomething = false
 
-  const smashedIds = new Set<number>()
-  state.lemons.forEach((lemon) => {
-    if (
-      distance(lemon.x, lemon.y, hitX, hitY) < SMASH_RADIUS ||
-      distance(lemon.x, lemon.y, player.x, player.y) < SMASH_BODY_RADIUS
-    ) {
-      smashedIds.add(lemon.id)
-      state.inventory.score += SCORE_SMASH
-      state.inventory.juice += 1
-      state.stats.lemonsSmashed += 1
-      addSplat(state, lemon.x, lemon.y, 72)
-      state.events.push({ type: 'smash', x: lemon.x, y: lemon.y })
-      registerComboHit(state, lemon.x, lemon.y)
-      hitSomething = true
-    }
-  })
-  state.lemons = state.lemons.filter((lemon) => !smashedIds.has(lemon.id))
+  const smashed = new Set<number>()
+  for (const lemon of state.lemons) {
+    const inArc = distance2D(lemon.x, lemon.z, hitX, hitZ) < SMASH_RADIUS
+    const underfoot = distance2D(lemon.x, lemon.z, player.x, player.z) < SMASH_BODY_RADIUS
+    if (!inArc && !underfoot) continue
 
-  state.trees.forEach((tree) => {
-    if (tree.stage !== 'full' || distance(tree.x, tree.y, hitX, hitY) >= TREE_HIT_RADIUS) return
+    smashed.add(lemon.id)
+    state.inventory.score += SCORE_SMASH
+    state.inventory.juice += 1
+    state.stats.lemonsSmashed += 1
+    state.events.push({ type: 'smash', x: lemon.x, y: lemon.y, z: lemon.z })
+    pourZest(state, lemon.x, lemon.z, ZEST_RADIUS_SMASH, 0.85)
+    registerComboHit(state, lemon.x, lemon.y, lemon.z)
+    hitSomething = true
+  }
+  if (smashed.size > 0) state.lemons = state.lemons.filter((lemon) => !smashed.has(lemon.id))
+
+  for (const tree of state.trees) {
+    if (tree.stage !== 'full') continue
+    if (distance2D(tree.x, tree.z, hitX, hitZ) >= TREE_HIT_RADIUS * tree.scale) continue
 
     tree.health -= 1
     tree.wobbleTimer = TREE_WOBBLE_TIME
+    tree.wobbleAngle = Math.atan2(tree.x - player.x, tree.z - player.z)
     hitSomething = true
     state.inventory.score += SCORE_TREE_HIT
     state.stats.treeHits += 1
-    registerComboHit(state, tree.x, tree.y)
+    registerComboHit(state, tree.x, tree.y, tree.z)
+
     if (tree.health <= 0) {
       tree.stage = 'broken'
       tree.respawnTimer = TREE_RESPAWN_TIME
       state.stats.treesBroken += 1
-      burstItems(state, tree.x, tree.y, BURST_ON_BREAK.lemons, BURST_ON_BREAK.leaves)
-      state.events.push({ type: 'treeBreak', x: tree.x, y: tree.y })
+      burstItems(state, tree, BURST_ON_BREAK.lemons, BURST_ON_BREAK.leaves)
+      state.events.push({ type: 'treeBreak', x: tree.x, y: tree.y, z: tree.z })
+      pourZest(state, tree.x, tree.z, ZEST_RADIUS_TREE_BREAK, 1)
     } else {
-      burstItems(state, tree.x, tree.y, BURST_PER_HIT.lemons, BURST_PER_HIT.leaves)
-      state.events.push({ type: 'treeHit', x: tree.x, y: tree.y })
+      burstItems(state, tree, BURST_PER_HIT.lemons, BURST_PER_HIT.leaves)
+      state.events.push({ type: 'treeHit', x: tree.x, y: tree.y, z: tree.z, health: tree.health })
+      pourZest(state, tree.x, tree.z, ZEST_RADIUS_TREE_HIT, 0.7)
     }
-  })
+  }
 
   if (!hitSomething) {
-    addSplat(state, hitX, hitY, 46)
-    state.events.push({ type: 'whiff', x: hitX, y: hitY })
+    state.events.push({
+      type: 'whiff',
+      x: hitX,
+      y: state.world.heightAt(hitX, hitZ),
+      z: hitZ,
+    })
   }
 }
 
@@ -270,19 +408,36 @@ export function takeSnapshot(state: GameState): GameSnapshot {
     lemons: state.inventory.lemons,
     juice: state.inventory.juice,
     leaves: state.inventory.leaves,
+    cups: state.inventory.cups,
+    sparkleCups: state.inventory.sparkleCups,
     nearStand: isNearStand(state),
     brewing: state.brewProgress > 0,
+    brewProgress: state.brewProgress,
     combo: state.comboCount >= COMBO_MIN_LEVEL ? state.comboCount : 0,
+    flockSize: state.flockSize,
+    lostCritters: countLost(state.critters),
+    bloomCoverage: state.bloomCoverage,
+    canServe: canServeNow(state),
+    outcome: state.outcome,
     stats: { ...state.stats },
   }
 }
 
-function registerComboHit(state: GameState, x: number, y: number) {
+export function isNearStand(state: GameState) {
+  return distance2D(state.player.x, state.player.z, state.stand.x, state.stand.z) < SELL_RADIUS
+}
+
+function pourZest(state: GameState, x: number, z: number, radius: number, strength: number) {
+  stampBloom(state.bloomField, x, z, radius, strength)
+  state.events.push({ type: 'zest', x, z, radius, strength })
+}
+
+function registerComboHit(state: GameState, x: number, y: number, z: number) {
   state.comboCount += 1
   state.comboTimer = COMBO_WINDOW
   if (state.comboCount >= COMBO_MIN_LEVEL) {
     state.inventory.score += SCORE_COMBO_BONUS
-    state.events.push({ type: 'combo', x, y, level: state.comboCount })
+    state.events.push({ type: 'combo', x, y, z, level: state.comboCount })
   }
 }
 
@@ -291,13 +446,14 @@ function lemonParts(state: GameState) {
 }
 
 function updateBrewing(state: GameState, dt: number) {
-  const canBrew = isNearStand(state) && lemonParts(state) >= LEMON_PARTS_PER_CUP
+  const hasRoom = state.inventory.cups < CUP_CAPACITY
+  const canBrew = isNearStand(state) && hasRoom && lemonParts(state) >= LEMON_PARTS_PER_CUP
   if (!canBrew) {
     state.brewProgress = 0
     return
   }
 
-  state.brewProgress += dt / BREW_TIME
+  state.brewProgress += dt / brewDuration(state)
   if (state.brewProgress < 1) return
   state.brewProgress = 0
 
@@ -307,167 +463,234 @@ function updateBrewing(state: GameState, dt: number) {
   partsNeeded -= juiceUsed
   state.inventory.lemons -= partsNeeded
 
+  // A leaf on hand turns this into a sparkle cup, worth double when it's given.
   const sparkle = state.inventory.leaves > 0
   if (sparkle) {
     state.inventory.leaves -= 1
-    state.stats.sparkleCups += 1
+    state.inventory.sparkleCups += 1
   }
+  state.inventory.cups += 1
+  state.inventory.score += SCORE_BREW
+  state.events.push({
+    type: 'cupBrewed',
+    x: state.stand.x,
+    y: state.stand.y,
+    z: state.stand.z,
+    sparkle,
+  })
+  pourZest(state, state.stand.x, state.stand.z, ZEST_RADIUS_CUP * (sparkle ? 1.3 : 1), 0.9)
+}
+
+/**
+ * Give a cup to the nearest lost creature. Brewing is the chore; this is the
+ * point of the round, and the moment the valley gets a piece of itself back.
+ */
+export function serveCup(state: GameState): Critter | null {
+  if (state.phase !== 'playing') return null
+  const served = serveNearestCritter(state)
+  if (!served) return null
+
   state.inventory.sold += 1
   state.stats.cupsSold += 1
-  state.inventory.score += sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
-  addSplat(state, state.stand.x, state.stand.y + 28, 62)
-  state.events.push({ type: 'cupSold', x: state.stand.x, y: state.stand.y, sparkle })
+  state.stats.crittersFreed += 1
+  if (served.sparkle) state.stats.sparkleCups += 1
+  state.inventory.score += served.sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
+
+  if (countLost(state.critters) === 0) endRound(state, 'valleyWoke')
+  return served.critter
 }
 
 function updateTrees(state: GameState, dt: number) {
-  state.trees.forEach((tree) => {
+  for (const tree of state.trees) {
     tree.wobbleTimer = Math.max(0, tree.wobbleTimer - dt)
     tree.regrowTimer = Math.max(0, tree.regrowTimer - dt)
-    if (tree.stage !== 'broken' || state.phase !== 'playing') return
+    if (tree.stage !== 'broken' || state.phase !== 'playing') continue
 
     tree.respawnTimer -= dt
     if (tree.respawnTimer <= 0) {
       tree.stage = 'full'
       tree.health = TREE_HEALTH
-      tree.regrowTimer = TREE_REGROW_POP
-      state.events.push({ type: 'treeRegrow', x: tree.x, y: tree.y })
+      tree.regrowTimer = TREE_REGROW_TIME
+      state.events.push({ type: 'treeRegrow', x: tree.x, y: tree.y, z: tree.z })
     }
-  })
+  }
 }
 
 function updateSpawning(state: GameState, dt: number) {
   state.lemonSpawnTimer -= dt
   if (state.lemonSpawnTimer <= 0) {
     state.lemonSpawnTimer = LEMON_SPAWN_INTERVAL
-    if (state.lemons.length < MAX_GROUND_LEMONS) {
-      state.lemons.push(spawnItem(state))
-    }
+    if (state.lemons.length < MAX_GROUND_LEMONS) state.lemons.push(spawnLooseItem(state))
   }
 
   state.leafSpawnTimer -= dt
   if (state.leafSpawnTimer <= 0) {
     state.leafSpawnTimer = LEAF_SPAWN_INTERVAL
-    if (state.leaves.length < MAX_GROUND_LEAVES) {
-      state.leaves.push(spawnItem(state))
-    }
+    if (state.leaves.length < MAX_GROUND_LEAVES) state.leaves.push(spawnLooseItem(state))
   }
 }
 
-function spawnItem(state: GameState): RollingItem {
-  // Keep spawns out of the stand corner so pickups never feel accidental.
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const x = 40 + Math.random() * (state.width - 80)
-    const y = 120 + Math.random() * (state.height - 260)
-    if (distance(x, y, state.stand.x, state.stand.y) > SELL_RADIUS * 1.1) {
-      return { id: state.nextId++, x, y, vx: 0, vy: 0 }
-    }
+/** Drops a fresh item somewhere walkable, never right on top of the stand. */
+function spawnLooseItem(state: GameState, rng: Rng = Math.random): GroundItem {
+  const world = state.world
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const angle = rng() * Math.PI * 2
+    const radius = Math.sqrt(rng()) * (world.playRadius - 2.5)
+    const x = Math.cos(angle) * radius
+    const z = Math.sin(angle) * radius
+    if (!isWalkable(world, x, z, 1)) continue
+    if (distance2D(x, z, state.stand.x, state.stand.z) < SELL_RADIUS * 1.2) continue
+    return makeItem(state, x, world.heightAt(x, z) + 0.25, z, 0, 0, 0, rng)
   }
+  return makeItem(state, 0, world.heightAt(0, 0) + 0.25, 0, 0, 0, 0, rng)
+}
+
+function makeItem(
+  state: GameState,
+  x: number,
+  y: number,
+  z: number,
+  vx: number,
+  vy: number,
+  vz: number,
+  rng: Rng = Math.random,
+): GroundItem {
   return {
     id: state.nextId++,
-    x: state.width * 0.5,
-    y: state.height * 0.6,
-    vx: 0,
-    vy: 0,
+    x,
+    y,
+    z,
+    vx,
+    vy,
+    vz,
+    spin: rng() * Math.PI * 2,
+    spinSpeed: randRange(rng, -6, 6),
+    resting: false,
+    age: 0,
   }
 }
 
-function burstItems(state: GameState, x: number, y: number, lemons: number, leaves: number) {
+/** Fruit and leaves fly out of a struck tree in a shallow cone. */
+function burstItems(state: GameState, tree: Tree, lemons: number, leaves: number) {
+  const canopyY = tree.y + 2.6 * tree.scale
   for (let index = 0; index < lemons; index += 1) {
-    const angle = (Math.PI * 2 * index) / lemons + Math.random() * 0.3
-    state.lemons.push({
-      id: state.nextId++,
-      x: x + Math.cos(angle) * 30,
-      y: y + Math.sin(angle) * 22,
-      vx: Math.cos(angle) * (120 + Math.random() * 80),
-      vy: Math.sin(angle) * (90 + Math.random() * 70),
-    })
+    const angle = (Math.PI * 2 * index) / lemons + Math.random() * 0.5
+    const speed = randRange(Math.random, 2.4, 5.2)
+    state.lemons.push(
+      makeItem(
+        state,
+        tree.x + Math.cos(angle) * 0.5,
+        canopyY,
+        tree.z + Math.sin(angle) * 0.5,
+        Math.cos(angle) * speed,
+        randRange(Math.random, 2.5, 5),
+        Math.sin(angle) * speed,
+      ),
+    )
   }
 
   for (let index = 0; index < leaves; index += 1) {
-    const angle = (Math.PI * 2 * index) / leaves + 0.5 + Math.random() * 0.4
-    state.leaves.push({
-      id: state.nextId++,
-      x: x + Math.cos(angle) * 30,
-      y: y + Math.sin(angle) * 24,
-      vx: Math.cos(angle) * (90 + Math.random() * 70),
-      vy: Math.sin(angle) * (90 + Math.random() * 60),
-    })
+    const angle = (Math.PI * 2 * index) / leaves + 0.6 + Math.random() * 0.5
+    const speed = randRange(Math.random, 1.2, 3)
+    state.leaves.push(
+      makeItem(
+        state,
+        tree.x + Math.cos(angle) * 0.5,
+        canopyY + 0.4,
+        tree.z + Math.sin(angle) * 0.5,
+        Math.cos(angle) * speed,
+        randRange(Math.random, 1.5, 3),
+        Math.sin(angle) * speed,
+      ),
+    )
   }
 }
 
-export function isNearStand(state: GameState) {
-  return distance(state.player.x, state.player.y, state.stand.x, state.stand.y) < SELL_RADIUS
-}
+function updateItems(state: GameState, items: GroundItem[], dt: number) {
+  const world = state.world
 
-function clampPlayer(state: GameState) {
-  // Keep the lamb below the two HUD rows (~190px) on tall portrait screens, but
-  // scale the bound down on short landscape worlds so the stand stays in reach.
-  const top = Math.max(state.height * 0.22, Math.min(190, state.height * 0.35))
-  const bottom = state.height - Math.max(118, state.height * 0.13)
-  state.player.x = clamp(state.player.x, PLAYER_RADIUS, state.width - PLAYER_RADIUS)
-  state.player.y = clamp(state.player.y, top, bottom)
-}
+  for (const item of items) {
+    item.age += dt
+    if (item.resting) {
+      item.spinSpeed = damp(item.spinSpeed, 0, 6, dt)
+      item.spin += item.spinSpeed * dt
+      continue
+    }
 
-function updateRollingItems(state: GameState, dt: number) {
-  const friction = Math.pow(0.05, dt)
-  const update = (item: RollingItem) => {
+    item.vy -= GRAVITY * dt
     item.x += item.vx * dt
     item.y += item.vy * dt
-    item.vx *= friction
-    item.vy *= friction
-    if (item.x < 24 || item.x > state.width - 24) item.vx *= -0.55
-    if (item.y < 96 || item.y > state.height - 128) item.vy *= -0.55
-    item.x = clamp(item.x, 24, state.width - 24)
-    item.y = clamp(item.y, 96, state.height - 128)
-  }
+    item.z += item.vz * dt
+    item.spin += item.spinSpeed * dt
 
-  state.lemons.forEach(update)
-  state.leaves.forEach(update)
+    constrainToMeadow(world, item.x, item.z, 0.25, scratchPoint)
+    if (scratchPoint.x !== item.x) item.vx *= -0.5
+    if (scratchPoint.z !== item.z) item.vz *= -0.5
+    item.x = scratchPoint.x
+    item.z = scratchPoint.z
+
+    const ground = world.heightAt(item.x, item.z) + 0.22
+    if (item.y <= ground) {
+      item.y = ground
+      if (item.vy < -0.6) {
+        item.vy = -item.vy * ITEM_RESTITUTION
+        item.spinSpeed = randRange(Math.random, -7, 7)
+      } else {
+        item.vy = 0
+      }
+      // Rolling drag only applies once the fruit is touching grass.
+      const drag = Math.exp(-ITEM_DRAG_LAMBDA * dt)
+      item.vx *= drag
+      item.vz *= drag
+      if (Math.hypot(item.vx, item.vy, item.vz) < ITEM_REST_SPEED) {
+        item.resting = true
+        item.vx = 0
+        item.vy = 0
+        item.vz = 0
+      }
+    }
+  }
 }
 
 function collectItems(state: GameState) {
-  const keptLemons: RollingItem[] = []
-  state.lemons.forEach((lemon) => {
-    if (distance(lemon.x, lemon.y, state.player.x, state.player.y) < PICKUP_RADIUS) {
+  const player = state.player
+  const reach = pickupRadius(state)
+
+  const keptLemons: GroundItem[] = []
+  for (const lemon of state.lemons) {
+    if (distance2D(lemon.x, lemon.z, player.x, player.z) < reach) {
       state.inventory.lemons += 1
       state.inventory.score += SCORE_PICKUP
       state.stats.lemonsCollected += 1
-      state.events.push({ type: 'pickupLemon', x: lemon.x, y: lemon.y })
+      state.events.push({ type: 'pickupLemon', x: lemon.x, y: lemon.y, z: lemon.z })
     } else {
       keptLemons.push(lemon)
     }
-  })
+  }
   state.lemons = keptLemons
 
-  const keptLeaves: RollingItem[] = []
-  state.leaves.forEach((leaf) => {
-    if (distance(leaf.x, leaf.y, state.player.x, state.player.y) < PICKUP_RADIUS) {
+  const keptLeaves: GroundItem[] = []
+  for (const leaf of state.leaves) {
+    if (distance2D(leaf.x, leaf.z, player.x, player.z) < reach) {
       state.inventory.leaves += 1
       state.inventory.score += SCORE_PICKUP
       state.stats.leavesCollected += 1
-      state.events.push({ type: 'pickupLeaf', x: leaf.x, y: leaf.y })
+      state.events.push({ type: 'pickupLeaf', x: leaf.x, y: leaf.y, z: leaf.z })
     } else {
       keptLeaves.push(leaf)
     }
-  })
+  }
   state.leaves = keptLeaves
 }
 
-function updateEffects(state: GameState, dt: number) {
-  state.effects.forEach((effect) => {
-    effect.ttl -= dt
-  })
-  state.effects = state.effects.filter((effect) => effect.ttl > 0)
+/** Progress of the current swing, 0 → 1. The renderer drives the mallet arc from this. */
+export function swingProgress(state: GameState) {
+  return state.player.swingTimer <= 0 ? 1 : 1 - state.player.swingTimer / SWING_TIME
 }
 
-function addSplat(state: GameState, x: number, y: number, size: number) {
-  state.effects.push({ id: state.nextId++, x, y, ttl: 0.44, maxTtl: 0.44, size })
+export function normalizedSpeed(state: GameState) {
+  return clamp(state.player.speed / PLAYER_SPEED, 0, 1)
 }
 
-function distance(ax: number, ay: number, bx: number, by: number) {
-  return Math.hypot(ax - bx, ay - by)
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max)
-}
+export type { World }
+export { canServeNow, nearestLostCritter, preFreeCritters } from './critters'

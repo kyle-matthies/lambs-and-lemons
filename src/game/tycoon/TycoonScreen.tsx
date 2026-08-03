@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { loadGameAssets, type GameAssets } from '../assets'
-import { drawDecorations } from '../render'
+import { StandScene } from '../../render/StandScene'
 import type { SoundManager } from '../../audio/sound'
 import type { DecorationId, TycoonSave } from '../../lib/storage'
 import {
@@ -98,40 +97,49 @@ export function TycoonScreen({
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const assetsRef = useRef<GameAssets | null>(null)
+  const sceneRef = useRef<StandScene | null>(null)
   const stateRef = useRef<TycoonState>(createTycoon(save.purse, save.day, save.decorations))
   const soundRef = useRef(sound)
   const onSaveRef = useRef(onSave)
   soundRef.current = sound
   onSaveRef.current = onSave
 
-  const [assetsReady, setAssetsReady] = useState(false)
+  const [sceneReady, setSceneReady] = useState(false)
   const [snap, setSnap] = useState<TycoonSnapshot>(() => snapshotOf(stateRef.current))
 
+  // Build the 3D stand a frame late so the coin UI paints first.
   useEffect(() => {
-    let mounted = true
-    loadGameAssets().then((assets) => {
-      if (!mounted) return
-      assetsRef.current = assets
-      setAssetsReady(true)
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    let cancelled = false
+    const handle = requestAnimationFrame(() => {
+      if (cancelled) return
+      try {
+        sceneRef.current = new StandScene(canvas)
+        sceneRef.current.setDecorations(stateRef.current.decorations)
+      } catch (error) {
+        console.error('Unable to start the stand scene', error)
+        return
+      }
+      setSceneReady(true)
     })
+
     return () => {
-      mounted = false
+      cancelled = true
+      cancelAnimationFrame(handle)
+      sceneRef.current?.dispose()
+      sceneRef.current = null
     }
   }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
-    const stage = stageRef.current
-    if (!canvas || !stage || !assetsReady) return
+    if (!canvas || !sceneReady) return
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect()
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.round(rect.width * dpr)
-      canvas.height = Math.round(rect.height * dpr)
-      const context = canvas.getContext('2d')
-      context?.setTransform(dpr, 0, 0, dpr, 0, 0)
+      sceneRef.current?.setSize(rect.width, rect.height)
     }
     resize()
     const observer = new ResizeObserver(resize)
@@ -140,22 +148,21 @@ export function TycoonScreen({
     let frame = 0
     let lastTime = performance.now()
     let lastUiTime = 0
-    let happyClock = 0
 
     const tick = (now: number) => {
       const state = stateRef.current
-      const assets = assetsRef.current
-      const context = canvas.getContext('2d')
+      const scene = sceneRef.current
       const dt = Math.min(0.05, (now - lastTime) / 1000)
       lastTime = now
 
       tickTycoon(state, dt)
-      happyClock = state.phase === 'happy' ? happyClock + dt : 0
 
       const events = drainTycoonEvents(state)
       events.forEach((event) => {
         const sfx = EVENT_SOUNDS[event.type]
         if (sfx) soundRef.current.play(sfx)
+        if (event.type === 'cheer') scene?.cheer()
+        if (event.type === 'buy') scene?.setDecorations(state.decorations)
         if (
           event.type === 'cheer' ||
           event.type === 'buy' ||
@@ -170,9 +177,15 @@ export function TycoonScreen({
         }
       })
 
-      if (assets && context) {
-        drawScene(context, canvas, assets, state, happyClock)
-      }
+      scene?.frame(
+        {
+          phase: state.phase,
+          walkT: state.walkT,
+          customerIndex: state.customerNumber,
+          hue: (state.customer.hue % 360) / 360,
+        },
+        dt,
+      )
 
       if (now - lastUiTime > 80) {
         setSnap(snapshotOf(state))
@@ -186,7 +199,7 @@ export function TycoonScreen({
       observer.disconnect()
       cancelAnimationFrame(frame)
     }
-  }, [assetsReady])
+  }, [sceneReady])
 
   const act = (action: (state: TycoonState) => void) => {
     action(stateRef.current)
@@ -218,7 +231,7 @@ export function TycoonScreen({
 
         <canvas className="tycoon-canvas" ref={canvasRef} aria-hidden="true" />
 
-        {!assetsReady && <div className="loading-panel">Loading</div>}
+        {!sceneReady && <div className="loading-panel">Opening the stand…</div>}
 
         <div className="tycoon-controls">
           {snap.phase === 'arriving' && <p className="tycoon-caption">Here comes a customer…</p>}
@@ -363,156 +376,4 @@ export function TycoonScreen({
       </section>
     </main>
   )
-}
-
-function drawScene(
-  context: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
-  assets: GameAssets,
-  state: TycoonState,
-  happyClock: number,
-) {
-  const width = canvas.clientWidth
-  const height = canvas.clientHeight
-  if (width === 0 || height === 0) return
-  const scale = Math.max(0.9, Math.min(width / 390, 1.4))
-
-  context.clearRect(0, 0, width, height)
-  context.drawImage(assets.background, 0, -height * 0.4, width, height * 2)
-  drawImageCentered(context, assets.sun, width * 0.1, height * 0.14, 66 * scale)
-
-  const standX = width * 0.28
-  const standY = height * 0.62
-  // Lammy peeks out beside the right post of her stand.
-  drawSprite(context, assets.lambIdle, standX + 82 * scale, standY - 34 * scale, 66 * scale, 70 * scale, false)
-  drawSprite(context, assets.stand, standX, standY, 180 * scale, 168 * scale, false)
-  drawDecorations(context, standX, standY, 1.35 * scale, state.decorations)
-
-  // Customer walks in from the right.
-  if (state.phase !== 'daySummary' && state.phase !== 'shop') {
-    const targetX = width * 0.7
-    const startX = width + 70
-    const eased = 1 - Math.pow(1 - state.walkT, 3)
-    const customerX = startX + (targetX - startX) * eased
-    const customerY = standY + 18 * scale
-    const bob = state.phase === 'arriving' ? Math.abs(Math.sin(state.walkT * 14)) * 6 : 0
-
-    const supportsFilter = typeof context.filter === 'string'
-    context.save()
-    if (supportsFilter) context.filter = `hue-rotate(${state.customer.hue}deg) saturate(1.15)`
-    drawSprite(context, assets.lambIdle, customerX, customerY - bob, 86 * scale, 92 * scale, true)
-    context.restore()
-
-    if (state.phase === 'ordering' || state.phase === 'serving' || state.phase === 'paying') {
-      drawBubble(context, customerX, customerY - 92 * scale, scale, state)
-    }
-
-    if (state.phase === 'happy') {
-      for (let index = 0; index < 5; index += 1) {
-        const t = (happyClock * 1.4 + index * 0.23) % 1
-        const x = customerX - 20 * scale + Math.sin((t + index) * 9) * 18 * scale + index * 9 * scale
-        const y = customerY - 60 * scale - t * 90 * scale
-        context.save()
-        context.globalAlpha = 1 - t
-        context.font = `${Math.round(18 * scale)}px sans-serif`
-        context.textAlign = 'center'
-        context.fillText('💛', x, y)
-        context.restore()
-      }
-    }
-
-    // Served cups slide across the counter.
-    for (let index = 0; index < state.cupsServed; index += 1) {
-      const cupX = standX + 70 * scale + index * 26 * scale
-      context.font = `${Math.round(24 * scale)}px sans-serif`
-      context.textAlign = 'center'
-      context.fillText('🥤', cupX, standY - 26 * scale)
-    }
-  }
-}
-
-function drawBubble(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  scale: number,
-  state: TycoonState,
-) {
-  const bubbleWidth = 128 * scale
-  const bubbleHeight = 66 * scale
-  const left = x - bubbleWidth * 0.72
-
-  context.save()
-  context.fillStyle = 'rgba(255, 255, 255, 0.95)'
-  context.strokeStyle = 'rgba(99, 74, 29, 0.35)'
-  context.lineWidth = 2.5 * scale
-  context.beginPath()
-  context.roundRect(left, y - bubbleHeight / 2, bubbleWidth, bubbleHeight, 14 * scale)
-  context.fill()
-  context.stroke()
-  context.beginPath()
-  context.moveTo(x - 6 * scale, y + bubbleHeight / 2)
-  context.lineTo(x + 10 * scale, y + bubbleHeight / 2 + 14 * scale)
-  context.lineTo(x + 16 * scale, y + bubbleHeight / 2 - 2 * scale)
-  context.closePath()
-  context.fill()
-
-  context.fillStyle = '#472b16'
-  context.font = `900 ${Math.round(17 * scale)}px Nunito, sans-serif`
-  context.textAlign = 'center'
-  context.textBaseline = 'middle'
-  context.fillText(
-    `🥤×${state.customer.cups}`,
-    left + bubbleWidth / 2,
-    y - bubbleHeight / 2 + 18 * scale,
-  )
-
-  // The price drawn as countable coin dots.
-  const dots = state.customer.price
-  const dotRadius = 5.5 * scale
-  const gap = 3.5 * scale
-  const rowWidth = dots * (dotRadius * 2 + gap) - gap
-  let dotX = left + bubbleWidth / 2 - rowWidth / 2 + dotRadius
-  const dotY = y + bubbleHeight / 2 - 16 * scale
-  for (let index = 0; index < dots; index += 1) {
-    context.beginPath()
-    context.fillStyle = '#ffca28'
-    context.strokeStyle = '#b8860b'
-    context.lineWidth = 1.6 * scale
-    context.arc(dotX, dotY, dotRadius, 0, Math.PI * 2)
-    context.fill()
-    context.stroke()
-    dotX += dotRadius * 2 + gap
-  }
-  context.restore()
-}
-
-function drawImageCentered(
-  context: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  x: number,
-  y: number,
-  size: number,
-) {
-  context.drawImage(image, x - size / 2, y - size / 2, size, size)
-}
-
-function drawSprite(
-  context: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  flip: boolean,
-) {
-  context.save()
-  if (flip) {
-    context.translate(x, y)
-    context.scale(-1, 1)
-    context.drawImage(image, -width / 2, -height / 2, width, height)
-  } else {
-    context.drawImage(image, x - width / 2, y - height / 2, width, height)
-  }
-  context.restore()
 }

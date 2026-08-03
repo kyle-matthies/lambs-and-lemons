@@ -27,3 +27,6 @@ dist-ssr
 # Playwright
 test-results/
 playwright-report/
+
+# Local screenshot sweeps from scripts/shoot.mjs
+.shots/
