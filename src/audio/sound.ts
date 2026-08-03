@@ -46,6 +46,12 @@ export class SoundManager {
   private master: GainNode | null = null
   private sfxBus: GainNode | null = null
   private _muted = false
+  /**
+   * The scene is usually asked for before the browser will let us have an audio
+   * context — a round can be underway well before the first tap. Remember the
+   * request so `unlock` can honour it once the context exists.
+   */
+  private sceneWanted = false
 
   music: MusicDirector | null = null
   ambience: AmbienceBed | null = null
@@ -82,6 +88,7 @@ export class SoundManager {
 
       this.music = new MusicDirector(this.ctx, this.master)
       this.ambience = new AmbienceBed(this.ctx, this.master)
+      if (this.sceneWanted) this.startScene()
 
       // iOS unmutes only after a buffer actually plays inside the gesture.
       const buffer = this.ctx.createBuffer(1, 1, 22050)
@@ -99,13 +106,15 @@ export class SoundManager {
     if (this.ctx?.state === 'suspended') void this.ctx.resume()
   }
 
-  /** Start the score and the ambience bed. Idempotent. */
+  /** Start the score and the ambience bed. Idempotent, and safe before unlock. */
   startScene() {
+    this.sceneWanted = true
     this.music?.start()
     this.ambience?.start()
   }
 
   stopScene() {
+    this.sceneWanted = false
     this.music?.stop()
     this.ambience?.stop()
   }
@@ -126,8 +135,9 @@ export class SoundManager {
    * @param wind     0-1 current gust strength
    */
   updateMix(recovery: number, urgency: number, wind: number) {
+    // The score schedules itself on its own timer; this only tells it how the
+    // round is going.
     this.music?.setIntensity(recovery, urgency)
-    this.music?.update()
     this.ambience?.update(recovery, wind)
   }
 

@@ -39,11 +39,19 @@ function semitone(steps: number) {
   return ROOT * Math.pow(2, steps / 12)
 }
 
-/** Scale degree → frequency, wrapping into higher octaves as the index grows. */
-function degree(index: number, octave = 0) {
-  const wrapped = ((index % SCALE.length) + SCALE.length) % SCALE.length
-  const octaves = Math.floor(index / SCALE.length) + octave
-  return semitone(SCALE[wrapped] + octaves * 12)
+/**
+ * Scale degree → frequency, wrapping into higher octaves as the index grows.
+ *
+ * `index` is floored: a fractional degree indexes the scale array with a
+ * non-integer, which yields `undefined` and propagates a NaN all the way to
+ * `AudioParam.setValueAtTime`. `transpose` shifts the result in semitones, which
+ * is the right unit for following a chord root.
+ */
+function degree(index: number, octave = 0, transpose = 0) {
+  const step = Math.floor(index)
+  const wrapped = ((step % SCALE.length) + SCALE.length) % SCALE.length
+  const octaves = Math.floor(step / SCALE.length) + octave
+  return semitone(SCALE[wrapped] + octaves * 12 + transpose)
 }
 
 interface Layer {
@@ -65,6 +73,7 @@ export class MusicDirector {
   private step = 0
   private nextNoteTime = 0
   private running = false
+  private timer: ReturnType<typeof setInterval> | null = null
   private intensity = 0
   private urgency = 0
 
@@ -121,6 +130,13 @@ export class MusicDirector {
     this.running = true
     this.nextNoteTime = this.ctx.currentTime + 0.08
     this.step = 0
+
+    // Deliberately not driven by the render loop. Tying note scheduling to
+    // requestAnimationFrame means the music stutters whenever the frame rate
+    // does — exactly when a weak device is already struggling — and stops dead
+    // if a frame takes longer than the lookahead. A timer of its own keeps the
+    // score steady no matter what the renderer is doing.
+    this.timer = setInterval(() => this.update(), 25)
     for (const voice of this.padVoices) {
       try {
         voice.osc.start()
@@ -140,7 +156,10 @@ export class MusicDirector {
     this.urgency = Math.min(1, Math.max(0, urgency))
   }
 
-  /** Call once a frame. Schedules whatever falls inside the lookahead window. */
+  /**
+   * Schedule whatever falls inside the lookahead window. Driven by the timer
+   * started in `start()`; safe to call again from anywhere.
+   */
   update() {
     if (!this.running || this.ctx.state !== 'running') return
 
@@ -203,7 +222,9 @@ export class MusicDirector {
     if (beat % 2 === 0 || (beat === 3 && this.intensity > 0.55)) {
       const shape = [0, 2, 4, 2, 5, 4, 2, 1]
       this.pluck({
-        frequency: degree(shape[beat] + chord.root / 2, 1),
+        // Follow the chord by transposing in semitones — adding the root as a
+        // scale *degree* would land between notes.
+        frequency: degree(shape[beat], 1, chord.root),
         time,
         length: stepDuration * 1.6,
         type: 'triangle',
@@ -249,6 +270,10 @@ export class MusicDirector {
     peak: number
     target: AudioNode
   }) {
+    // A bad frequency should cost a silent note, not a flood of Web Audio
+    // exceptions from inside the scheduler.
+    if (!Number.isFinite(options.frequency) || options.frequency <= 0) return
+
     const osc = this.ctx.createOscillator()
     const gain = this.ctx.createGain()
     osc.type = options.type
@@ -283,6 +308,10 @@ export class MusicDirector {
 
   stop() {
     this.running = false
+    if (this.timer !== null) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
     const now = this.ctx.currentTime
     for (const layer of Object.values(this.layers)) {
       layer.gain.gain.cancelScheduledValues(now)

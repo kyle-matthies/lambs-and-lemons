@@ -150,3 +150,50 @@ test('the HUD tracks the creatures still waiting', async ({ page }) => {
   const cups = page.locator('.hud-card', { hasText: 'Cups' }).locator('strong')
   await expect(cups).toHaveText('0')
 })
+
+test('the synthesized score and effects actually make sound', async ({ page }) => {
+  // Every sound in the game is generated at runtime, so "does it work" can be
+  // answered by counting the nodes the synth builds. Patched before load.
+  await page.addInitScript(() => {
+    const stats = { contexts: 0, oscillators: 0, state: () => 'none' }
+    ;(window as unknown as { __audio: typeof stats }).__audio = stats
+    const Original = window.AudioContext
+    // @ts-expect-error deliberately swapping the constructor for a counting shim
+    window.AudioContext = function (...args: unknown[]) {
+      // @ts-expect-error forwarding to the real constructor
+      const ctx = new Original(...args)
+      stats.contexts += 1
+      const create = ctx.createOscillator.bind(ctx)
+      ctx.createOscillator = () => {
+        stats.oscillators += 1
+        return create()
+      }
+      stats.state = () => ctx.state
+      return ctx
+    }
+  })
+
+  await page.goto('/?mode=arcade&go=1')
+  await expect(page.locator('.bloom-meter')).toBeVisible({ timeout: 30_000 })
+
+  const read = () =>
+    page.evaluate(() => {
+      const stats = (window as unknown as { __audio: { contexts: number; oscillators: number; state: () => string } })
+        .__audio
+      return { contexts: stats.contexts, oscillators: stats.oscillators, state: stats.state() }
+    })
+
+  // Browsers won't hand out a running context until the player touches something.
+  await page.mouse.click(200, 300)
+  await expect
+    .poll(async () => (await read()).state, { timeout: 15_000 })
+    .toBe('running')
+
+  const unlocked = await read()
+  expect(unlocked.contexts).toBe(1)
+
+  // The score schedules on its own timer, so notes keep coming without input.
+  await expect
+    .poll(async () => (await read()).oscillators, { timeout: 20_000 })
+    .toBeGreaterThan(unlocked.oscillators)
+})
