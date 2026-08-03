@@ -20,6 +20,7 @@ import {
   MAX_GROUND_LEAVES,
   MAX_GROUND_LEMONS,
   PLAYER_SPEED,
+  SWING_TIME,
   TREE_REGROW_TIME,
   TREE_WOBBLE_TIME,
 } from '../game/constants'
@@ -28,6 +29,7 @@ import { BLOOM_AREA, BLOOM_ORIGIN } from '../game/bloom'
 import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
 import { CritterHerd } from './critters'
+import { Floaters } from './floaters'
 import { ParticleField, ZestRings } from './fx'
 import {
   buildTreeGeometry,
@@ -44,10 +46,18 @@ import { Lamb } from './lamb'
 import { PALETTE, SOUR_TINT } from './palette'
 import { PostPipeline } from './postfx'
 import { ItemField, createBlobShadow, createStand } from './props'
-import { detectQualityTier, settingsFor, stepTier, type QualitySettings, type QualityTier } from './quality'
+import {
+  detectQualityTier,
+  prefersReducedMotion,
+  settingsFor,
+  stepTier,
+  type QualitySettings,
+  type QualityTier,
+} from './quality'
 import { TERRAIN_TIERS, createTerrain } from './terrain'
 import { makeDetailTexture, makeRadialAlphaTexture } from './textures'
 import { Sky } from './sky'
+import { SwingTrail } from './trail'
 import { createValleyUniforms } from './valleyShading'
 import { Water } from './water'
 
@@ -77,6 +87,8 @@ const OCCLUSION_RADIUS = 2.4
 
 export interface ValleyRendererOptions {
   tier?: QualityTier
+  /** Container for the DOM-rendered score popups. Omit to disable them. */
+  floaterLayer?: HTMLElement | null
   /** Skip the adaptive downgrade watchdog (used by tests for determinism). */
   adaptive?: boolean
   /**
@@ -108,6 +120,8 @@ export class ValleyRenderer {
   private readonly treeGeometries: TreeGeometrySet[] = []
   private readonly particles: ParticleField
   private readonly zestRings = new ZestRings(14)
+  private readonly swingTrail = new SwingTrail()
+  private readonly floaters: Floaters | null
   private readonly lamb: Lamb
   private critterHerd: CritterHerd | null = null
   private lambShadow: Mesh
@@ -129,6 +143,7 @@ export class ValleyRenderer {
   private readonly adaptive: boolean
   private readonly healOverride: number | null
   private readonly bloomFlooded: boolean
+  private calmMotion = false
   private disposed = false
 
   private readonly tmp = new Vector3()
@@ -138,6 +153,7 @@ export class ValleyRenderer {
 
   constructor(canvas: HTMLCanvasElement, state: GameState, options: ValleyRendererOptions = {}) {
     this.adaptive = options.adaptive ?? true
+    this.floaters = options.floaterLayer ? new Floaters(options.floaterLayer) : null
     this.healOverride = options.healOverride ?? null
     this.bloomFlooded = options.bloomFlooded ?? false
     this.settings = settingsFor(options.tier ?? detectQualityTier())
@@ -165,7 +181,7 @@ export class ValleyRenderer {
     this.uniforms.uBloomOrigin.value.set(BLOOM_ORIGIN, BLOOM_ORIGIN)
     this.uniforms.uBloomInvSize.value = 1 / BLOOM_AREA
     // Never let the world go fully monochrome — a hint of colour survives.
-    this.uniforms.uBloomFloor.value = 0.2
+    this.uniforms.uBloomFloor.value = 0.24
 
     // --- lighting -------------------------------------------------------------
     // Light is the other half of the bloom system. The splat map recolours
@@ -211,6 +227,11 @@ export class ValleyRenderer {
     this.scene.add(this.particles.solidMesh)
     this.scene.add(this.particles.glowMesh)
     this.scene.add(this.zestRings.group)
+    this.scene.add(this.swingTrail.mesh)
+
+    // Respect the OS motion preference: no camera shake, gentler screen flashes.
+    this.calmMotion = prefersReducedMotion()
+    this.followCamera.setShakeScale(this.calmMotion ? 0 : 1)
 
     this.followCamera.reset(state.player.x, state.player.y, state.player.z, state.world)
     this.seedInitialBloom(state)
@@ -356,6 +377,7 @@ export class ValleyRenderer {
     this.bloomMap.reset()
     this.particles.clear()
     this.zestRings.clear()
+    this.floaters?.clear()
     this.heal = 0
     this.time = 0
 
@@ -366,6 +388,10 @@ export class ValleyRenderer {
       visual.group.rotation.x = 0
       visual.group.rotation.z = 0
     }
+
+    // Respect the OS motion preference: no camera shake, gentler screen flashes.
+    this.calmMotion = prefersReducedMotion()
+    this.followCamera.setShakeScale(this.calmMotion ? 0 : 1)
 
     this.followCamera.reset(state.player.x, state.player.y, state.player.z, state.world)
     this.seedInitialBloom(state)
@@ -406,6 +432,7 @@ export class ValleyRenderer {
         }
 
         case 'smash': {
+          this.floaters?.spawn(event.x, event.y + 0.5, event.z, '+1', 'lemon')
           this.particles.burst(event.x, event.y + 0.25, event.z, {
             count: 16,
             color: PALETTE.lemon,
@@ -423,7 +450,7 @@ export class ValleyRenderer {
             life: [0.3, 0.55],
           })
           this.followCamera.addShake(0.07, 0.14)
-          this.post?.addFlash(0.045)
+          this.flash(0.045)
           break
         }
 
@@ -441,6 +468,7 @@ export class ValleyRenderer {
         }
 
         case 'treeHit': {
+          this.floaters?.spawn(event.x, event.y + 3.2, event.z, '+2', 'leaf')
           const canopyY = event.y + 2.9
           this.particles.burst(event.x, canopyY, event.z, {
             count: 14,
@@ -457,6 +485,7 @@ export class ValleyRenderer {
         }
 
         case 'treeBreak': {
+          this.floaters?.spawn(event.x, event.y + 3, event.z, 'CRACK!', 'leaf')
           const canopyY = event.y + 2.8
           this.particles.burst(event.x, canopyY, event.z, {
             count: 34,
@@ -477,7 +506,7 @@ export class ValleyRenderer {
             glow: true,
           })
           this.followCamera.addShake(0.3, 0.42)
-          this.post?.addFlash(0.11)
+          this.flash(0.11)
           break
         }
 
@@ -513,6 +542,7 @@ export class ValleyRenderer {
         }
 
         case 'cupBrewed': {
+          this.floaters?.spawn(event.x, event.y + 2.1, event.z, event.sparkle ? '✨ cup' : '🥤 cup', 'cup')
           // A modest fountain over the stand — brewing is the setup, not the payoff.
           this.particles.burst(event.x, event.y + 1.5, event.z, {
             count: event.sparkle ? 26 : 16,
@@ -524,11 +554,18 @@ export class ValleyRenderer {
             gravity: 9,
             life: [0.5, 1],
           })
-          this.post?.addFlash(0.05)
+          this.flash(0.05)
           break
         }
 
         case 'critterServed': {
+          this.floaters?.spawn(
+            event.x,
+            event.y + 1.2,
+            event.z,
+            event.sparkle ? '+10 💛' : '+5 💛',
+            'friend',
+          )
           // The payoff. Colour erupts out of the creature and washes outward.
           this.particles.burst(event.x, event.y + 0.7, event.z, {
             count: event.sparkle ? 64 : 42,
@@ -549,7 +586,7 @@ export class ValleyRenderer {
             gravity: 6,
             life: [0.9, 1.7],
           })
-          this.post?.addFlash(event.sparkle ? 0.28 : 0.18)
+          this.flash(event.sparkle ? 0.28 : 0.18)
           this.followCamera.addShake(0.16, 0.3)
           break
         }
@@ -569,6 +606,7 @@ export class ValleyRenderer {
         }
 
         case 'valleyWoke': {
+          this.floaters?.spawn(event.x, event.y + 2.6, event.z, 'THE VALLEY WOKE UP!', 'triumph')
           // Everything at once: the whole meadow floods with colour.
           this.bloomMap.flood(this.renderer)
           this.particles.burst(event.x, event.y + 1.2, event.z, {
@@ -581,12 +619,19 @@ export class ValleyRenderer {
             gravity: 5,
             life: [1.2, 2.4],
           })
-          this.post?.addFlash(0.55)
+          this.flash(0.55)
           this.followCamera.addShake(0.35, 0.6)
           break
         }
 
         case 'combo': {
+          this.floaters?.spawn(
+            state.player.x,
+            state.player.y + 2,
+            state.player.z,
+            `x${event.level}!`,
+            'combo',
+          )
           this.particles.burst(state.player.x, state.player.y + 1.4, state.player.z, {
             count: Math.min(24, 6 + event.level * 2),
             color: PALETTE.standCloth,
@@ -645,6 +690,14 @@ export class ValleyRenderer {
     this.lambShadow.scale.setScalar(shadowScale)
 
     this.critterHerd?.update(state.critters, dt, this.time)
+
+    // The trail is brightest through the strike and gone by the recovery.
+    const swing = state.player.swingTimer
+    const swingT = swing > 0 ? 1 - swing / SWING_TIME : 1
+    const trailStrength = swing > 0 ? clamp01((swingT - 0.24) / 0.16) * (1 - clamp01((swingT - 0.5) / 0.4)) : 0
+    this.lamb.getMalletTip(this.tmp)
+    this.swingTrail.update(this.tmp, trailStrength)
+
     this.lemonField.sync(state.lemons, this.time)
     this.leafField.sync(state.leaves, this.time)
     this.updateTrees(state, dt)
@@ -701,6 +754,8 @@ export class ValleyRenderer {
       this.renderer.render(this.scene, this.followCamera.camera)
     }
 
+    this.floaters?.update(this.followCamera.camera, this.width, this.height, dt)
+
     if (this.adaptive) this.watchPerformance(dt)
   }
 
@@ -723,8 +778,13 @@ export class ValleyRenderer {
     this.fog.near = lerp(24, 46, heal)
     this.fog.far = lerp(78, 138, heal)
 
-    this.renderer.toneMappingExposure = lerp(1.04, 1.14, heal)
+    this.renderer.toneMappingExposure = lerp(1.08, 1.16, heal)
     this.uniforms.uRimStrength.value = lerp(0.14, 0.26, heal)
+  }
+
+  /** Screen flash, damped for players who asked for reduced motion. */
+  private flash(magnitude: number) {
+    this.post?.addFlash(this.calmMotion ? magnitude * 0.3 : magnitude)
   }
 
   private updateTrees(state: GameState, dt: number) {
@@ -801,6 +861,8 @@ export class ValleyRenderer {
     this.bloomMap.dispose()
     this.particles.dispose()
     this.zestRings.dispose()
+    this.swingTrail.dispose()
+    this.floaters?.dispose()
     this.lemonField.dispose()
     this.leafField.dispose()
     this.water?.dispose()

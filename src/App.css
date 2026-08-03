@@ -1367,3 +1367,76 @@ button:focus-visible,
 .menu-stage .menu-strip {
   background: rgba(255, 252, 226, 0.9);
 }
+
+/* ---------------------------------------------------------------------------
+   World-anchored score popups
+   Positioned by the renderer each frame from a projected world position, so the
+   type stays crisp at any resolution without a font atlas.
+   --------------------------------------------------------------------------- */
+
+.floater-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.world-floater {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  font-weight: 950;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #fffbe8;
+  opacity: 0;
+  will-change: transform, opacity;
+  text-shadow:
+    0 2px 0 rgba(52, 34, 8, 0.65),
+    0 0 14px rgba(255, 226, 130, 0.55);
+}
+
+.world-floater.lemon {
+  color: #ffe066;
+}
+
+.world-floater.leaf {
+  color: #a9ec6b;
+}
+
+.world-floater.cup {
+  color: #ffeaa0;
+}
+
+.world-floater.friend {
+  color: #ffd0e4;
+  font-size: 1.6rem;
+}
+
+.world-floater.combo {
+  color: #ff9d7a;
+  font-size: 1.75rem;
+}
+
+.world-floater.triumph {
+  color: #fff3b0;
+  font-size: 2.2rem;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 520px) {
+  .world-floater {
+    font-size: 1.05rem;
+  }
+
+  .world-floater.friend,
+  .world-floater.combo {
+    font-size: 1.25rem;
+  }
+
+  .world-floater.triumph {
+    font-size: 1.5rem;
+  }
+}

@@ -73,6 +73,22 @@ const FLAT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['pl
 /** Below this a zest burst is background colour, not an event worth hearing. */
 const ZEST_SOUND_RADIUS = 6
 
+/**
+ * Haptics for the moments worth feeling. Android fires these; iOS Safari ignores
+ * `navigator.vibrate` entirely, which is fine — it's an enhancement, not a cue.
+ */
+function buzz(pattern: number | number[]) {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+  if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return
+  }
+  try {
+    navigator.vibrate(pattern)
+  } catch {
+    // Some browsers throw when the page isn't user-activated yet.
+  }
+}
+
 export function GameCanvas({
   sound,
   muted,
@@ -87,6 +103,7 @@ export function GameCanvas({
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const floaterLayerRef = useRef<HTMLDivElement | null>(null)
   const rendererRef = useRef<ValleyRenderer | null>(null)
   const gameRef = useRef<GameState | null>(null)
   const inputRef = useRef<GameInput>(EMPTY_INPUT)
@@ -140,6 +157,7 @@ export function GameCanvas({
       try {
         rendererRef.current = new ValleyRenderer(canvas, game, {
           healOverride: healParam === null ? undefined : Number(healParam),
+          floaterLayer: floaterLayerRef.current,
         })
       } catch (error) {
         console.error('Unable to start the 3D renderer', error)
@@ -210,9 +228,16 @@ export function GameCanvas({
                 // Only the big bursts get a voice, or every smash would chime twice.
                 if (event.radius >= ZEST_SOUND_RADIUS) sound.playAt('zest', event.x, event.z)
                 break
+              case 'smash':
+                buzz(12)
+                break
+              case 'treeBreak':
+                buzz([18, 40, 26])
+                break
               case 'critterServed':
                 sound.playAt(event.sparkle ? 'sparkle' : 'ding', event.x, event.z)
                 sound.playAt('bleat', event.x, event.z)
+                buzz([22, 50, 22, 50, 38])
                 break
               case 'flockJoin':
                 sound.playAt('bleat', event.x, event.z)
@@ -221,6 +246,7 @@ export function GameCanvas({
               case 'valleyWoke':
                 sound.play('fanfare')
                 sound.music?.celebrate()
+                buzz([40, 70, 40, 70, 120])
                 break
               default:
                 break
@@ -359,6 +385,7 @@ export function GameCanvas({
     <main className="game-shell immersive">
       <section className="phone-stage world" ref={stageRef} aria-label="Lambs & Lemons: The Sour Valley">
         <canvas className="game-canvas" ref={canvasRef} aria-hidden="true" />
+        <div className="floater-layer" ref={floaterLayerRef} aria-hidden="true" />
         <GameHud snapshot={snapshot} best={bestForRound} />
 
         {!ready && <div className="loading-panel">Growing the valley…</div>}

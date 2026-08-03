@@ -306,12 +306,13 @@ export class Lamb {
     this.armPivot.add(this.malletMesh)
   }
 
-  /** World-space position of the mallet head — used to spawn impact effects. */
-  getMalletTip(target: { x: number; y: number; z: number }) {
+  /** World-space position of the mallet head — drives the swing trail and impacts. */
+  getMalletTip<T extends { x: number; y: number; z: number }>(target: T) {
     this.malletMesh.updateWorldMatrix(true, false)
-    target.x = this.malletMesh.matrixWorld.elements[12]
-    target.y = this.malletMesh.matrixWorld.elements[13]
-    target.z = this.malletMesh.matrixWorld.elements[14]
+    const elements = this.malletMesh.matrixWorld.elements
+    target.x = elements[12]
+    target.y = elements[13]
+    target.z = elements[14]
     return target
   }
 

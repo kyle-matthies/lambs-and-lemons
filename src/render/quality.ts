@@ -89,6 +89,11 @@ export function detectQualityTier(): QualityTier {
   return cores >= 8 ? 'high' : 'medium'
 }
 
+/** True when the player has asked the OS to keep animation calm. */
+export function prefersReducedMotion() {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
 export const TIER_ORDER: QualityTier[] = ['low', 'medium', 'high']
 
 export function stepTier(tier: QualityTier, direction: -1 | 1): QualityTier {

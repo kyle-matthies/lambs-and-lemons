@@ -49,6 +49,7 @@ export class FollowCamera {
   private readonly shakes: Shake[] = []
   private framing = LANDSCAPE
   private boom = 1
+  private shakeScale = 1
   private introBlend = 0
 
   constructor() {
@@ -70,8 +71,14 @@ export class FollowCamera {
     this.camera.updateProjectionMatrix()
   }
 
+  /** Scales every subsequent shake. 0 disables them for reduced-motion users. */
+  setShakeScale(scale: number) {
+    this.shakeScale = scale
+  }
+
   addShake(magnitude: number, duration: number, frequency = 34) {
-    this.shakes.push({ magnitude, time: duration, duration, frequency })
+    if (this.shakeScale <= 0) return
+    this.shakes.push({ magnitude: magnitude * this.shakeScale, time: duration, duration, frequency })
     if (this.shakes.length > 6) this.shakes.shift()
   }
 
