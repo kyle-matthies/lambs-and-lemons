@@ -13,6 +13,7 @@ import {
   Quaternion,
   SphereGeometry,
   Vector3,
+  type IUniform,
   type Texture,
 } from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
@@ -160,7 +161,16 @@ export function buildTreeGeometry(seed: number, variant: number): TreeGeometrySe
   return { full, stump }
 }
 
-export function createFoliageMaterial(uniforms: ValleyUniforms, detail: Texture) {
+/**
+ * One material per tree, each with its own `uFade`, so a tree that wanders
+ * between the camera and Lammy can dissolve out of the way on its own. They all
+ * compile to the same program, so the extra materials cost nothing but a uniform.
+ */
+export function createFoliageMaterial(
+  uniforms: ValleyUniforms,
+  detail: Texture,
+  fade: IUniform<number>,
+) {
   const material = new MeshStandardMaterial({
     vertexColors: true,
     map: detail,
@@ -170,9 +180,9 @@ export function createFoliageMaterial(uniforms: ValleyUniforms, detail: Texture)
   applyValleyShading(material, uniforms, {
     wind: 0.16,
     swayAttribute: true,
-    phaseAttribute: true,
     bloom: true,
     rim: 1,
+    fade,
   })
   return material
 }

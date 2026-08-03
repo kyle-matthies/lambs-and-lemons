@@ -60,6 +60,13 @@ export interface ValleyShadingOptions {
    * you've given one a cup it stays in colour even while standing in grey grass.
    */
   localHeal?: IUniform<number>
+  /**
+   * Per-material 0-1 visibility. Below 1 the surface dissolves through an ordered
+   * dither rather than turning transparent — screen-door fade keeps it in the
+   * opaque pass, so it still sorts and still casts shadows correctly. Used to
+   * dissolve trees that get between the camera and Lammy.
+   */
+  fade?: IUniform<number>
   /** Sway amplitude in metres at full gust. 0 disables the wind path entirely. */
   wind?: number
   /** Read per-vertex `aSway` instead of falling back to local Y. */
@@ -104,6 +111,31 @@ varying vec3 vWorldPosition;
 
 const LOCAL_HEAL_DECLARATION = /* glsl */ `
 uniform float uLocalHeal;
+`
+
+const FADE_DECLARATION = /* glsl */ `
+uniform float uFade;
+
+// 4x4 ordered Bayer threshold — cheap, stable under camera motion, and it reads
+// as a soft dissolve rather than a shimmer.
+float vlyDither( vec2 coord ) {
+  int x = int( mod( coord.x, 4.0 ) );
+  int y = int( mod( coord.y, 4.0 ) );
+  int index = x + y * 4;
+  float threshold[16];
+  threshold[0]  = 0.0625; threshold[1]  = 0.5625; threshold[2]  = 0.1875; threshold[3]  = 0.6875;
+  threshold[4]  = 0.8125; threshold[5]  = 0.3125; threshold[6]  = 0.9375; threshold[7]  = 0.4375;
+  threshold[8]  = 0.2500; threshold[9]  = 0.7500; threshold[10] = 0.1250; threshold[11] = 0.6250;
+  threshold[12] = 1.0000; threshold[13] = 0.5000; threshold[14] = 0.8750; threshold[15] = 0.3750;
+  for ( int i = 0; i < 16; i ++ ) {
+    if ( i == index ) return threshold[i];
+  }
+  return 0.5;
+}
+`
+
+const FADE_CHUNK = /* glsl */ `
+  if ( uFade < 0.999 && uFade < vlyDither( gl_FragCoord.xy ) ) discard;
 `
 
 function projectChunk(options: ValleyShadingOptions) {
@@ -227,12 +259,17 @@ export function applyValleyShading(
   uniforms: ValleyUniforms,
   options: ValleyShadingOptions = {},
 ) {
-  const { localHeal, ...cacheableOptions } = options
-  const key = `${JSON.stringify(cacheableOptions)}:${localHeal ? 'local' : 'world'}`
+  const { localHeal, fade, ...cacheableOptions } = options
+  const key = [
+    JSON.stringify(cacheableOptions),
+    localHeal ? 'local' : 'world',
+    fade ? 'fade' : 'solid',
+  ].join(':')
 
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     if (options.localHeal) shader.uniforms.uLocalHeal = options.localHeal
+    if (options.fade) shader.uniforms.uFade = options.fade
 
     let defines = ''
     if (options.swayAttribute) defines += '#define VLY_SWAY_ATTRIBUTE\n'
@@ -245,9 +282,13 @@ export function applyValleyShading(
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `${FRAGMENT_DECLARATIONS}${
-          options.localHeal ? LOCAL_HEAL_DECLARATION : ''
+        `${FRAGMENT_DECLARATIONS}${options.localHeal ? LOCAL_HEAL_DECLARATION : ''}${
+          options.fade ? FADE_DECLARATION : ''
         }\n#include <common>`,
+      )
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\n${options.fade ? FADE_CHUNK : ''}`,
       )
       .replace('#include <color_fragment>', `#include <color_fragment>\n${bloomChunk(options)}`)
       .replace(

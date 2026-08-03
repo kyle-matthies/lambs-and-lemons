@@ -181,8 +181,17 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
   updateItems(state, state.lemons, dt)
   updateItems(state, state.leaves, dt)
 
+  if (state.phase === 'ready') {
+    // Before the round starts you can still stroll around, and the menu's
+    // backdrop drives the same path with a scripted input. Nothing is scored and
+    // the clock hasn't started.
+    state.elapsed += dt
+    updatePlayer(state, input, dt)
+    updateCritters(state, dt)
+    return
+  }
+
   if (state.phase !== 'playing') {
-    // Idle attract state still animates, but nothing is scored.
     player.speed = damp(player.speed, 0, 8, dt)
     state.elapsed += dt
     return

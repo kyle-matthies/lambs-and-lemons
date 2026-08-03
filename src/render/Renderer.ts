@@ -15,7 +15,7 @@ import {
   type BufferGeometry,
   type Texture,
 } from 'three'
-import { clamp01, damp, easeOutBack, lerp } from '../core/math'
+import { clamp01, damp, easeOutBack, lerp, smoothstep } from '../core/math'
 import {
   MAX_GROUND_LEAVES,
   MAX_GROUND_LEMONS,
@@ -68,7 +68,12 @@ interface TreeVisual {
   full: Mesh
   stump: Mesh
   baseScale: number
+  /** 1 = solid, 0 = fully dissolved. Driven by camera occlusion. */
+  fade: { value: number }
 }
+
+/** Radius around the camera→player line inside which a tree dissolves. */
+const OCCLUSION_RADIUS = 2.4
 
 export interface ValleyRendererOptions {
   tier?: QualityTier
@@ -80,6 +85,11 @@ export interface ValleyRendererOptions {
    * of the range without playing a whole round.
    */
   healOverride?: number
+  /**
+   * Start with the whole valley already in colour. The menu backdrop shows the
+   * valley as it *could* be; the round itself always starts drained.
+   */
+  bloomFlooded?: boolean
 }
 
 export class ValleyRenderer {
@@ -118,6 +128,7 @@ export class ValleyRenderer {
   private adaptiveTimer = 0
   private readonly adaptive: boolean
   private readonly healOverride: number | null
+  private readonly bloomFlooded: boolean
   private disposed = false
 
   private readonly tmp = new Vector3()
@@ -128,6 +139,7 @@ export class ValleyRenderer {
   constructor(canvas: HTMLCanvasElement, state: GameState, options: ValleyRendererOptions = {}) {
     this.adaptive = options.adaptive ?? true
     this.healOverride = options.healOverride ?? null
+    this.bloomFlooded = options.bloomFlooded ?? false
     this.settings = settingsFor(options.tier ?? detectQualityTier())
 
     this.renderer = new WebGLRenderer({
@@ -254,13 +266,15 @@ export class ValleyRenderer {
     this.worldGroup.add(createReeds(world, layout.reeds, this.uniforms))
 
     // Trees: one merged geometry per variant, one mesh pair per planted tree.
-    const foliage = createFoliageMaterial(this.uniforms, this.detailTexture)
     for (let variant = 0; variant < 3; variant += 1) {
       this.treeGeometries.push(buildTreeGeometry(world.seed, variant))
     }
 
     for (const tree of state.trees) {
       const set = this.treeGeometries[tree.variant % this.treeGeometries.length]
+      const fade = { value: 1 }
+      const foliage = createFoliageMaterial(this.uniforms, this.detailTexture, fade)
+
       const group = new Group()
       group.position.set(tree.x, tree.y, tree.z)
       group.rotation.y = tree.rotation
@@ -276,7 +290,7 @@ export class ValleyRenderer {
       group.add(full, stump)
       this.worldGroup.add(group)
 
-      this.treeVisuals.push({ group, full, stump, baseScale: tree.scale })
+      this.treeVisuals.push({ group, full, stump, baseScale: tree.scale, fade })
     }
 
     const stand = createStand(this.uniforms, this.detailTexture)
@@ -298,7 +312,7 @@ export class ValleyRenderer {
    * opening frame reads as "a valley losing its colour" rather than "a broken build".
    */
   private seedInitialBloom(state: GameState) {
-    if (this.healOverride !== null && this.healOverride >= 1) {
+    if (this.bloomFlooded || (this.healOverride !== null && this.healOverride >= 1)) {
       // Debug view: flood the whole valley so the fully-recovered look can be
       // inspected without playing a round.
       this.bloomMap.flood(this.renderer)
@@ -605,7 +619,11 @@ export class ValleyRenderer {
     }
   }
 
-  frame(state: GameState, dt: number) {
+  /**
+   * @param cinematic Drive a slow orbit instead of the chase camera. Used for
+   *        the menu backdrop, where nobody is holding the stick.
+   */
+  frame(state: GameState, dt: number, cinematic = false) {
     if (this.disposed) return
     this.time += dt
 
@@ -629,7 +647,7 @@ export class ValleyRenderer {
     this.critterHerd?.update(state.critters, dt, this.time)
     this.lemonField.sync(state.lemons, this.time)
     this.leafField.sync(state.leaves, this.time)
-    this.updateTrees(state)
+    this.updateTrees(state, dt)
 
     this.particles.update(dt, (x, z) => state.world.heightAt(x, z))
     this.zestRings.update(dt)
@@ -643,16 +661,21 @@ export class ValleyRenderer {
     )
 
     // --- camera ---------------------------------------------------------------
-    this.followCamera.update(
-      state.world,
-      state.player.x,
-      state.player.y,
-      state.player.z,
-      state.player.vx,
-      state.player.vz,
-      clamp01(state.player.speed / PLAYER_SPEED),
-      dt,
-    )
+    if (cinematic) {
+      this.tmp.set(state.player.x, state.player.y, state.player.z)
+      this.followCamera.orbit(state.world, this.tmp, this.time, 22, 11)
+    } else {
+      this.followCamera.update(
+        state.world,
+        state.player.x,
+        state.player.y,
+        state.player.z,
+        state.player.vx,
+        state.player.vz,
+        clamp01(state.player.speed / PLAYER_SPEED),
+        dt,
+      )
+    }
     this.followCamera.camera.updateMatrixWorld()
 
     // The translucency term needs the sun in view space, so it has to be refreshed
@@ -704,11 +727,32 @@ export class ValleyRenderer {
     this.uniforms.uRimStrength.value = lerp(0.14, 0.26, heal)
   }
 
-  private updateTrees(state: GameState) {
+  private updateTrees(state: GameState, dt: number) {
+    const camera = this.followCamera.camera.position
+    // Vector from the camera to Lammy — anything sitting on this line is in the way.
+    const lineX = state.player.x - camera.x
+    const lineZ = state.player.z - camera.z
+    const lineLengthSq = lineX * lineX + lineZ * lineZ || 1
+
     for (let index = 0; index < state.trees.length; index += 1) {
       const tree = state.trees[index]
       const visual = this.treeVisuals[index]
       if (!visual) continue
+
+      // Dissolve trees that come between the camera and the player. Projecting
+      // onto the sight line is enough — we only care about the ones in front.
+      const toTreeX = tree.x - camera.x
+      const toTreeZ = tree.z - camera.z
+      const along = (toTreeX * lineX + toTreeZ * lineZ) / lineLengthSq
+      let fadeTarget = 1
+      if (along > 0.02 && along < 0.98) {
+        const perpX = toTreeX - lineX * along
+        const perpZ = toTreeZ - lineZ * along
+        const offset = Math.hypot(perpX, perpZ)
+        // Fully dissolved directly in front, back to solid by the outer radius.
+        fadeTarget = smoothstep(OCCLUSION_RADIUS * 0.45, OCCLUSION_RADIUS, offset) * 0.78 + 0.22
+      }
+      visual.fade.value = damp(visual.fade.value, fadeTarget, 9, dt)
 
       const broken = tree.stage === 'broken'
       visual.full.visible = !broken
