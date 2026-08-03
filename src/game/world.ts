@@ -46,6 +46,13 @@ export interface GroveRecipe {
   terrain: { rolling: number; dimple: number }
   pond: Pond | null
   stand: { x: number; z: number }
+  /**
+   * How much grass covers the ground, 0-1, as a multiplier on the existing
+   * density mask. This matters more to how a place reads than any prop count
+   * does — the meadow is mostly grass by area, so thinning it is what turns a
+   * meadow into a hillside.
+   */
+  ground: { grass: number }
   scatter: {
     trees: number
     /** Minimum metres between trunks. Drop it and a meadow becomes an orchard. */
@@ -67,6 +74,7 @@ export const DEFAULT_RECIPE: GroveRecipe = {
   terrain: { rolling: 1.55, dimple: 0.34 },
   pond: { x: -15.5, z: -9.5, radius: 7.2, depth: 2.3 },
   stand: { x: 1.5, z: 10.5 },
+  ground: { grass: 1 },
   scatter: { trees: 15, treeSpacing: 6.2, bushes: 46, rocks: 38, flowers: 190, reeds: 90 },
 }
 

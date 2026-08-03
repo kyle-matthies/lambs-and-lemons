@@ -160,20 +160,26 @@ export function createGrass(world: World, options: GrassOptions, uniforms: Valle
   const up = new Vector3(0, 1, 0)
   const normal = { x: 0, y: 1, z: 0 }
   const tint = new Color()
-  const phases = new Float32Array(options.tufts)
+  // How green this place is. The quality tier decides how many tufts the
+  // hardware can afford; the recipe decides what fraction of that a given place
+  // actually gets, which is the difference between a meadow and a bare ridge.
+  const target = Math.max(0, Math.round(options.tufts * world.recipe.ground.grass))
+  const phases = new Float32Array(target)
 
   let placed = 0
   let attempts = 0
-  const maxAttempts = options.tufts * 12
+  const maxAttempts = target * 12
 
-  while (placed < options.tufts && attempts < maxAttempts) {
+  while (placed < target && attempts < maxAttempts) {
     attempts += 1
     const angle = rng() * Math.PI * 2
     const radius = Math.sqrt(rng()) * options.radius
     const x = Math.cos(angle) * radius
     const z = Math.sin(angle) * radius
 
-    // Density mask: thick in the meadow, thinning out over the dry rim.
+    // Density mask: thick in the meadow, thinning out over the dry rim. This
+    // shapes *where* grass goes; how much of it there is comes from the target
+    // count below, because this loop retries until it hits that number.
     const density =
       (1 - smoothstep(world.playRadius * 0.9, world.playRadius * 1.3, radius)) *
       (0.55 + 0.45 * (fbm(noise, x * 0.09, z * 0.09, { octaves: 2 }) * 0.5 + 0.5))

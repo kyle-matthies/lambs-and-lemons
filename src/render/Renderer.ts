@@ -28,6 +28,7 @@ import {
 import type { GameEvent, GameState } from '../game/types'
 import type { DecorationId } from '../lib/storage'
 import { BLOOM_AREA, BLOOM_ORIGIN } from '../game/bloom'
+import { objectiveFraction } from '../game/objectives'
 import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
 import { createDaylightState, evaluateDaylight } from './daylight'
@@ -772,8 +773,17 @@ export class ValleyRenderer {
 
     // The HUD calls the timer "Sunset", so the light had better agree with it.
     // Once the valley wakes the sun climbs back up instead of going down.
+    //
+    // A chapter has no clock to agree with, so the sun is moved by the work
+    // instead: the light goes gold as the objectives fill in. Every chapter
+    // therefore arrives at golden hour exactly as you finish it, because
+    // finishing is what makes the sun go down.
     const total = Math.max(1, state.roundMinutes * 60)
-    const elapsed = state.phase === 'ready' ? 0 : clamp01(1 - state.timeLeft / total)
+    const progress =
+      state.mode === 'story'
+        ? objectiveFraction(state)
+        : clamp01(1 - state.timeLeft / total)
+    const elapsed = state.phase === 'ready' ? 0 : progress
     const duskTarget = state.outcome === 'valleyWoke' ? 0 : elapsed
     this.dusk =
       this.duskOverride ??
