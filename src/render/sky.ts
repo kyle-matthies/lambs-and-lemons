@@ -154,11 +154,6 @@ export class Sky {
     ;(this.material.uniforms.uSunDirection.value as Vector3).copy(this.sunDirection)
   }
 
-  setColors(zenith: Color, horizon: Color, glow: Color) {
-    ;(this.material.uniforms.uZenith.value as Color).copy(zenith)
-    ;(this.material.uniforms.uHorizon.value as Color).copy(horizon)
-    ;(this.material.uniforms.uGlow.value as Color).copy(glow)
-  }
 
   update(time: number, heal: number, cameraPosition: Vector3) {
     this.material.uniforms.uTime.value = time

@@ -1,5 +1,4 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import { TycoonScreen } from './game/tycoon/TycoonScreen'
 import { MenuScreen } from './ui/MenuScreen'
 import { SoundManager } from './audio/sound'
 import {
@@ -12,9 +11,13 @@ import {
 } from './lib/storage'
 import './App.css'
 
-// Keeps three.js out of the initial download; the menu is interactive first.
+// Both play modes pull in three.js, so both load on demand — the menu stays
+// interactive on a small download and the renderer arrives behind it.
 const GameCanvas = lazy(() =>
   import('./game/GameCanvas').then((module) => ({ default: module.GameCanvas })),
+)
+const TycoonScreen = lazy(() =>
+  import('./game/tycoon/TycoonScreen').then((module) => ({ default: module.TycoonScreen })),
 )
 
 type Screen = 'menu' | 'arcade' | 'tycoon'
@@ -100,14 +103,16 @@ function App() {
 
   if (screen === 'tycoon') {
     return (
-      <TycoonScreen
-        sound={sound}
-        muted={muted}
-        onToggleMute={toggleMute}
-        onExit={goHome}
-        save={tycoonSave}
-        onSave={saveTycoon}
-      />
+      <Suspense fallback={<div className="boot-panel">Opening the stand…</div>}>
+        <TycoonScreen
+          sound={sound}
+          muted={muted}
+          onToggleMute={toggleMute}
+          onExit={goHome}
+          save={tycoonSave}
+          onSave={saveTycoon}
+        />
+      </Suspense>
     )
   }
 

@@ -1,5 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
+// The arcade is a 3D scene; headless Chromium software-rasterises it, so both
+// world generation and the simulation run well below real time.
+test.describe.configure({ timeout: 120_000 })
+
 function watchErrors(page: Page) {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
@@ -105,4 +109,42 @@ test('landscape layout keeps controls on screen', async ({ page }) => {
     expect(smash.y + smash.height).toBeLessThanOrEqual(390)
     expect(smash.x + smash.width).toBeLessThanOrEqual(844)
   }
+})
+
+test('the bloom meter is wired to the simulation', async ({ page }) => {
+  const errors = watchErrors(page)
+  // Straight into a running round so the whole budget goes on play, not menus.
+  await page.goto('/?mode=arcade&go=1')
+
+  const meter = page.locator('.bloom-meter')
+  await expect(meter).toBeVisible({ timeout: 30_000 })
+
+  // The valley opens with a scrap of colour around Lammy and the stand, so a
+  // meter reading zero would mean the HUD isn't reading the simulation at all.
+  const label = await meter.getAttribute('aria-label')
+  const announced = Number((label ?? '').replace(/\D/g, ''))
+  expect(announced).toBeGreaterThan(0)
+
+  // ...and the bar the player actually sees agrees with what's announced.
+  const width = await page.locator('.bloom-fill').evaluate((element) => element.style.width)
+  expect(Number(width.replace('%', ''))).toBe(announced)
+
+  // That the number *grows* as you smash is asserted in `npm run test:sim`,
+  // which plays whole rounds in about a second. Here the software rasteriser
+  // runs the simulation at roughly a twentieth of real time, so a browser test
+  // of the same thing would be measuring the renderer, not the mechanic.
+  await page.keyboard.press('Space')
+  expect(errors).toEqual([])
+})
+
+test('the HUD tracks the creatures still waiting', async ({ page }) => {
+  await page.goto('/?mode=arcade&go=1')
+
+  const friends = page.locator('.hud-card', { hasText: 'Friends' }).locator('strong')
+  await expect(friends).toBeVisible({ timeout: 30_000 })
+  // Nobody has been helped yet, and there is a whole valley of them to find.
+  await expect(friends).toHaveText(/^0\/\d+$/)
+
+  const cups = page.locator('.hud-card', { hasText: 'Cups' }).locator('strong')
+  await expect(cups).toHaveText('0')
 })

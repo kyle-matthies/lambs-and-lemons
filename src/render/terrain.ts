@@ -6,7 +6,7 @@ import {
   MeshStandardMaterial,
   type Texture,
 } from 'three'
-import { clamp01, lerp, smoothstep } from '../core/math'
+import { clamp01, smoothstep } from '../core/math'
 import { createNoise2D, fbm } from '../core/noise'
 import { mulberry32 } from '../core/rng'
 import type { World } from '../game/world'
@@ -180,14 +180,3 @@ export function createTerrain(
   return mesh
 }
 
-/** Blend factor for props that should sink into the shoreline mud. */
-export function shoreBlend(world: World, x: number, z: number) {
-  const distance = Math.hypot(x - world.pond.x, z - world.pond.z)
-  return 1 - smoothstep(world.pond.radius * 0.8, world.pond.radius * 1.2, distance)
-}
-
-export function terrainTintAt(world: World, x: number, z: number, out = new Color()) {
-  const y = world.heightAt(x, z)
-  const wet = smoothstep(world.waterLevel + 0.4, world.waterLevel - 0.4, y)
-  return out.copy(PALETTE.grassMid).lerp(PALETTE.soil, lerp(0, 0.7, wet))
-}

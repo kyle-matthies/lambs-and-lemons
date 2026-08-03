@@ -18,16 +18,6 @@ export function mulberry32(seed: number): Rng {
   }
 }
 
-/** Turn a string into a stable 32-bit seed (FNV-1a). */
-export function hashSeed(text: string) {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return hash >>> 0
-}
-
 export function randRange(rng: Rng, min: number, max: number) {
   return min + rng() * (max - min)
 }
@@ -40,9 +30,3 @@ export function pick<T>(rng: Rng, items: readonly T[]): T {
   return items[Math.min(items.length - 1, Math.floor(rng() * items.length))]
 }
 
-/** Random point inside a disc, uniformly distributed by area. */
-export function randInDisc(rng: Rng, radius: number) {
-  const angle = rng() * Math.PI * 2
-  const distance = Math.sqrt(rng()) * radius
-  return { x: Math.cos(angle) * distance, z: Math.sin(angle) * distance }
-}

@@ -253,9 +253,6 @@ export class ParticleField {
     if (this.glowMesh.instanceColor) this.glowMesh.instanceColor.needsUpdate = true
   }
 
-  get activeCount() {
-    return this.particles.length
-  }
 
   clear() {
     while (this.particles.length > 0) this.pool.push(this.particles.pop()!)

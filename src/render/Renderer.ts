@@ -349,8 +349,8 @@ export class ValleyRenderer {
       return
     }
     // Mirrors the same two seed splats the simulation stamps in `createGame`.
-    this.bloomMap.splat(state.stand.x, state.stand.z, 13, 0.95)
-    this.bloomMap.splat(state.player.x, state.player.z, 11, 0.85)
+    this.bloomMap.splat(state.stand.x, state.stand.z, 9, 0.9)
+    this.bloomMap.splat(state.player.x, state.player.z, 5, 0.55)
   }
 
   // -------------------------------------------------------------------------

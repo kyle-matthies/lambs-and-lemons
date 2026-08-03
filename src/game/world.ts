@@ -1,4 +1,4 @@
-import { clamp01, lerp, smoothstep } from '../core/math'
+import { lerp, smoothstep } from '../core/math'
 import { createNoise2D, fbm, ridged } from '../core/noise'
 import { mulberry32, randRange, type Rng } from '../core/rng'
 
@@ -329,7 +329,3 @@ export function constrainToMeadow(
   return out
 }
 
-/** 0 at the meadow edge, 1 deep inside — used to fade grass and fog near the rim. */
-export function meadowFalloff(world: World, x: number, z: number) {
-  return clamp01(1 - Math.hypot(x, z) / world.playRadius)
-}

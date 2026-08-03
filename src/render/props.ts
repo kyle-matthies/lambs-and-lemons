@@ -1,5 +1,4 @@
 import {
-  AdditiveBlending,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -311,20 +310,6 @@ export function createBlobShadow(alphaMap: Texture, size = 1) {
   return mesh
 }
 
-/** Additive glow sprite used for sparkle cups and the brew ring. */
-export function createGlowSprite(alphaMap: Texture, color: Color, size = 1) {
-  const material = new MeshBasicMaterial({
-    color,
-    alphaMap,
-    transparent: true,
-    blending: AdditiveBlending,
-    depthWrite: false,
-  })
-  const mesh = new Mesh(new PlaneGeometry(size, size), material)
-  mesh.renderOrder = 5
-  return mesh
-}
-
 // ---------------------------------------------------------------------------
 // Stand decorations
 // ---------------------------------------------------------------------------
@@ -502,8 +487,3 @@ export function setDecorations(group: Group, owned: DecorationId[]) {
   }
 }
 
-export function createPropGroup(name: string) {
-  const group = new Group()
-  group.name = name
-  return group
-}

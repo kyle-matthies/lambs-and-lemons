@@ -1,5 +1,5 @@
 import { PerspectiveCamera, Vector3 } from 'three'
-import { clamp, clamp01, damp, inverseLerp, lerp } from '../core/math'
+import { clamp01, damp, inverseLerp, lerp } from '../core/math'
 import type { World } from '../game/world'
 
 /**
@@ -50,7 +50,6 @@ export class FollowCamera {
   private framing = LANDSCAPE
   private boom = 1
   private shakeScale = 1
-  private introBlend = 0
 
   constructor() {
     this.camera.position.set(0, 12, 16)
@@ -90,7 +89,6 @@ export class FollowCamera {
     this.camera.lookAt(this.lookTarget)
     this.camera.rotateX(HORIZON_TILT)
     this.shakes.length = 0
-    this.introBlend = 1
   }
 
   private updateTargets(
@@ -180,13 +178,5 @@ export class FollowCamera {
     this.camera.lookAt(centre.x, centre.y + 1.6, centre.z)
   }
 
-  get framingDistance() {
-    return this.framing.distance * this.boom
-  }
 
-  /** Blend factor for the opening push-in, 0 → 1. */
-  advanceIntro(dt: number, speed = 0.55) {
-    this.introBlend = clamp(this.introBlend + dt * speed, 0, 1)
-    return this.introBlend
-  }
 }

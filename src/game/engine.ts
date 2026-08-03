@@ -149,10 +149,12 @@ export function createGame(
     nextId,
   }
 
-  // The stand and Lammy's own patch start with a little colour — the valley is
-  // fading, not dead.
-  stampBloom(state.bloomField, state.stand.x, state.stand.z, 13, 0.95)
-  stampBloom(state.bloomField, state.player.x, state.player.z, 11, 0.85)
+  // The stand keeps its own small patch of colour and Lammy stands in a scrap of
+  // living grass — the valley is fading, not dead. Deliberately tight: a wide
+  // pre-painted circle would swallow the first few smashes and rob the player of
+  // the one piece of feedback the whole design rests on.
+  stampBloom(state.bloomField, state.stand.x, state.stand.z, 9, 0.9)
+  stampBloom(state.bloomField, state.player.x, state.player.z, 5, 0.55)
 
   // A ring of fruit within a couple of strides of the start, so the very first
   // swing always connects. Nothing kills an opening like whiffing at empty grass.

@@ -47,21 +47,8 @@ export function dampAngle(current: number, target: number, lambda: number, dt: n
   return current + angleDelta(current, target) * (1 - Math.exp(-lambda * dt))
 }
 
-export function moveTowards(current: number, target: number, maxDelta: number) {
-  const delta = target - current
-  if (Math.abs(delta) <= maxDelta) return target
-  return current + Math.sign(delta) * maxDelta
-}
-
 export function distance2D(ax: number, az: number, bx: number, bz: number) {
   return Math.hypot(ax - bx, az - bz)
-}
-
-/** Squared planar distance — for comparisons, skips the sqrt. */
-export function distanceSq2D(ax: number, az: number, bx: number, bz: number) {
-  const dx = ax - bx
-  const dz = az - bz
-  return dx * dx + dz * dz
 }
 
 export function easeOutCubic(t: number) {
@@ -76,17 +63,6 @@ export function easeOutBack(t: number) {
   const c1 = 1.70158
   const c3 = c1 + 1
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
-}
-
-export function easeOutElastic(t: number) {
-  if (t <= 0) return 0
-  if (t >= 1) return 1
-  const c4 = TAU / 3
-  return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1
-}
-
-export function easeOutQuint(t: number) {
-  return 1 - Math.pow(1 - t, 5)
 }
 
 /** Bell curve peaking at t = 0.5. Handy for one-shot squash/stretch. */

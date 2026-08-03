@@ -140,12 +140,6 @@ export class MusicDirector {
     this.urgency = Math.min(1, Math.max(0, urgency))
   }
 
-  setVolume(volume: number) {
-    const now = this.ctx.currentTime
-    this.bus.gain.cancelScheduledValues(now)
-    this.bus.gain.setTargetAtTime(volume, now, 0.2)
-  }
-
   /** Call once a frame. Schedules whatever falls inside the lookahead window. */
   update() {
     if (!this.running || this.ctx.state !== 'running') return

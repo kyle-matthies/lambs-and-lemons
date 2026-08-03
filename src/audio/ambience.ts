@@ -35,8 +35,6 @@ export class AmbienceBed {
   private readonly cricketGain: GainNode
 
   private running = false
-  private recovery = 0
-  private windStrength = 0.5
   private nextBird = 0
   private nextCricket = 0
 
@@ -80,10 +78,6 @@ export class AmbienceBed {
     this.nextCricket = this.ctx.currentTime + 0.5
   }
 
-  setVolume(volume: number) {
-    this.bus.gain.setTargetAtTime(volume, this.ctx.currentTime, 0.2)
-  }
-
   /**
    * @param recovery 0-1 valley recovery.
    * @param windStrength matches the gust value driving the grass, so what you
@@ -92,8 +86,6 @@ export class AmbienceBed {
   update(recovery: number, windStrength: number) {
     if (!this.running || this.ctx.state !== 'running') return
 
-    this.recovery = recovery
-    this.windStrength = windStrength
     const now = this.ctx.currentTime
 
     // Wind: louder and brighter in gusts, and a touch softer once the valley is
@@ -170,11 +162,4 @@ export class AmbienceBed {
     this.windSource = null
   }
 
-  get currentRecovery() {
-    return this.recovery
-  }
-
-  get currentWind() {
-    return this.windStrength
-  }
 }

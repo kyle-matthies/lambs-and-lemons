@@ -1,7 +1,6 @@
 import {
   BufferGeometry,
   Color,
-  ConeGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -404,9 +403,3 @@ export class Lamb {
   }
 }
 
-/** A tiny cone used as the "where am I facing" ground marker in tutorials. */
-export function buildFacingMarker() {
-  const cone = new ConeGeometry(0.12, 0.3, 6)
-  cone.rotateX(Math.PI / 2)
-  return paint(cone, PALETTE.lemonLight)
-}

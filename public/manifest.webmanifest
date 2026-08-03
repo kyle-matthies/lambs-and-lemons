@@ -1,12 +1,12 @@
 {
-  "name": "Lammy's Lemonade Smash",
+  "name": "Lammy's Lemonade Smash — The Sour Valley",
   "short_name": "Lammy",
-  "description": "Smash lemons, sell lemonade! A quirky lamb-with-a-mallet game designed by a 6-year-old game director.",
+  "description": "The valley has gone grey. Smash lemons, brew lemonade, and bring the colours back.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#86df53",
-  "theme_color": "#86df53",
+  "background_color": "#16303a",
+  "theme_color": "#16303a",
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }

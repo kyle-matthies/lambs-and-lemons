@@ -1,11 +1,9 @@
 import {
   BufferAttribute,
   CircleGeometry,
-  Color,
   DoubleSide,
   Mesh,
   ShaderMaterial,
-  Vector2,
   Vector3,
 } from 'three'
 import type { World } from '../game/world'
@@ -160,9 +158,6 @@ export class Water {
     ;(this.material.uniforms.uSunDirection.value as Vector3).copy(direction).normalize()
   }
 
-  setSkyTint(color: Color) {
-    ;(this.material.uniforms.uSkyTint.value as Color).copy(color)
-  }
 
   update(time: number, heal: number) {
     this.material.uniforms.uTime.value = time
@@ -174,5 +169,3 @@ export class Water {
     this.material.dispose()
   }
 }
-
-export const WATER_RIPPLE_SCALE = new Vector2(1, 1)
