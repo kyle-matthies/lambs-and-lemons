@@ -782,7 +782,7 @@ export class ValleyRenderer {
     this.uniforms.uWindStrength.value = 0.75 + Math.sin(this.time * 0.23) * 0.35
 
     // --- characters and props -------------------------------------------------
-    this.lamb.update(state.player, dt, this.time)
+    this.lamb.update(state.player, dt, this.time, state.inventory.cups)
     this.lambShadow.position.set(state.player.x, state.player.y + 0.04, state.player.z)
     const shadowScale = 1 + clamp01(state.player.speed / PLAYER_SPEED) * 0.18
     this.lambShadow.scale.setScalar(shadowScale)

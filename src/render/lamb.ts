@@ -196,6 +196,34 @@ function buildTail(rng: Rng) {
   return merged
 }
 
+/**
+ * The cups Lammy is carrying, on a little tray on her back.
+ *
+ * The HUD counts them, but a number in a corner isn't the same as seeing her
+ * loaded up and hurrying to find someone. Three separate meshes so they can be
+ * shown one at a time as she brews.
+ */
+function buildCup() {
+  const parts: BufferGeometry[] = []
+  const cup = new CylinderGeometry(0.055, 0.042, 0.11, 10, 1)
+  parts.push(paint(cup, PALETTE.standClothAlt))
+
+  const juice = new CylinderGeometry(0.049, 0.04, 0.08, 10, 1)
+  // Filled nearly to the rim: from the game's high camera, a cup of juice that
+  // sits low in the cup just reads as an empty cup.
+  juice.translate(0, 0.006, 0)
+  parts.push(paint(juice, PALETTE.juice))
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
+function buildTray() {
+  const tray = new CylinderGeometry(0.16, 0.15, 0.025, 12, 1)
+  return paint(tray, PALETTE.malletHandle)
+}
+
 function buildMallet() {
   const parts: BufferGeometry[] = []
 
@@ -253,6 +281,8 @@ export class Lamb {
   private readonly legs: LegRig[] = []
   private readonly tail: Mesh
   private readonly armPivot = new Group()
+  private readonly tray = new Group()
+  private readonly cups: Mesh[] = []
   readonly malletMesh: Mesh
 
   private lean = 0
@@ -324,6 +354,30 @@ export class Lamb {
     this.tail.position.set(0, BODY_HEIGHT + 0.14, -0.42)
     this.body.add(this.tail)
 
+    // A tray of cups rides on her back, between the shoulders.
+    this.tray.position.set(0, BODY_HEIGHT + 0.34, -0.2)
+    this.tray.rotation.x = -0.08
+    this.body.add(this.tray)
+
+    const trayMesh = new Mesh(buildTray(), material)
+    trayMesh.castShadow = true
+    this.tray.add(trayMesh)
+
+    const cupGeometry = buildCup()
+    const cupSpots: [number, number][] = [
+      [0, 0.055],
+      [-0.075, -0.05],
+      [0.075, -0.05],
+    ]
+    for (const [x, z] of cupSpots) {
+      const cup = new Mesh(cupGeometry, material)
+      cup.castShadow = true
+      cup.position.set(x, 0.07, z)
+      cup.visible = false
+      this.tray.add(cup)
+      this.cups.push(cup)
+    }
+
     // The mallet rides on a shoulder pivot on her right side.
     this.armPivot.position.set(0.3, BODY_HEIGHT + 0.16, 0.06)
     this.body.add(this.armPivot)
@@ -357,8 +411,19 @@ export class Lamb {
    * Pose Lammy from a player state. Takes the `Player` rather than the whole
    * `GameState` so the stand scene can puppet her with a hand-made one.
    */
-  update(player: Player, dt: number, time: number) {
+  /**
+   * @param carrying how many cups are on the tray, 0 to 3
+   */
+  update(player: Player, dt: number, time: number, carrying = 0) {
     const speed01 = clamp01(player.speed / PLAYER_SPEED)
+
+    for (let index = 0; index < this.cups.length; index += 1) {
+      this.cups[index].visible = index < carrying
+    }
+    // The tray stays level-ish while she runs, like someone actually carrying it.
+    this.tray.rotation.x = -0.08 - this.body.rotation.x * 0.7
+    this.tray.rotation.z = -this.lean * 0.6
+    this.tray.visible = carrying > 0
 
     this.group.position.set(player.x, player.y, player.z)
     this.group.rotation.y = player.facing
