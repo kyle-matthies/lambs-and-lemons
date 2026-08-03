@@ -52,7 +52,8 @@ const emptySnapshot: GameSnapshot = {
   },
 }
 
-const EVENT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>> = {
+/** World events that get panned and attenuated relative to the camera. */
+const SPATIAL_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>> = {
   smash: 'splat',
   whiff: 'boing',
   treeHit: 'thunk',
@@ -60,10 +61,17 @@ const EVENT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['p
   treeRegrow: 'regrow',
   pickupLemon: 'pop',
   pickupLeaf: 'pop',
-  countdown: 'tick',
-  cupBrewed: 'ding',
-  flockJoin: 'coin',
+  cupBrewed: 'brew',
+  footstep: 'step',
 }
+
+/** ...and the ones that belong to the player, not to a place. */
+const FLAT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>> = {
+  countdown: 'tick',
+}
+
+/** Below this a zest burst is background colour, not an event worth hearing. */
+const ZEST_SOUND_RADIUS = 6
 
 export function GameCanvas({
   sound,
@@ -88,6 +96,7 @@ export function GameCanvas({
   const bestRef = useRef<BestByRound>({})
   const soundRef = useRef(sound)
   const roundMinutesRef = useRef<RoundMinutes>(2)
+  const listenerRef = useRef({ x: 0, z: 0, forwardX: 0, forwardZ: -1 })
   soundRef.current = sound
 
   const [ready, setReady] = useState(false)
@@ -138,6 +147,7 @@ export function GameCanvas({
       }
       setSnapshot(takeSnapshot(game))
       setReady(true)
+      soundRef.current.startScene()
     })
 
     return () => {
@@ -187,14 +197,54 @@ export function GameCanvas({
         const events = drainEvents(state)
         if (events.length > 0) {
           renderer.handleEvents(events, state)
+          const sound = soundRef.current
           for (const event of events) {
-            const sfx = EVENT_SOUNDS[event.type]
-            if (sfx) soundRef.current.play(sfx)
-            if (event.type === 'critterServed') {
-              soundRef.current.play(event.sparkle ? 'sparkle' : 'cheer')
+            const flat = FLAT_SOUNDS[event.type]
+            if (flat) sound.play(flat)
+
+            const spatial = SPATIAL_SOUNDS[event.type]
+            if (spatial && 'x' in event && 'z' in event) sound.playAt(spatial, event.x, event.z)
+
+            switch (event.type) {
+              case 'zest':
+                // Only the big bursts get a voice, or every smash would chime twice.
+                if (event.radius >= ZEST_SOUND_RADIUS) sound.playAt('zest', event.x, event.z)
+                break
+              case 'critterServed':
+                sound.playAt(event.sparkle ? 'sparkle' : 'ding', event.x, event.z)
+                sound.playAt('bleat', event.x, event.z)
+                break
+              case 'flockJoin':
+                sound.playAt('bleat', event.x, event.z)
+                sound.play('coin')
+                break
+              case 'valleyWoke':
+                sound.play('fanfare')
+                sound.music?.celebrate()
+                break
+              default:
+                break
             }
-            if (event.type === 'valleyWoke') soundRef.current.play('fanfare')
           }
+        }
+
+        {
+          // Adaptive mix: the score and the ambience follow the same recovery
+          // number the lighting does, and the wind you hear is the gust the
+          // grass is bending to.
+          const sound = soundRef.current
+          renderer.readListener(listenerRef.current)
+          sound.setListener(
+            listenerRef.current.x,
+            listenerRef.current.z,
+            listenerRef.current.forwardX,
+            listenerRef.current.forwardZ,
+          )
+          const urgency =
+            state.phase === 'playing'
+              ? 1 - Math.min(1, state.timeLeft / Math.max(1, state.roundMinutes * 60))
+              : 0
+          sound.updateMix(state.bloomCoverage, urgency, renderer.windStrength)
         }
 
         if (state.phase === 'ended' && lastPhaseRef.current !== 'ended') {
@@ -248,6 +298,7 @@ export function GameCanvas({
     setStick({ active: false, x: 0, y: 0 })
     setSnapshot(takeSnapshot(game))
     sound.play('tap')
+    sound.startScene()
   }
 
   const handleRoundChange = (minutes: RoundMinutes) => {

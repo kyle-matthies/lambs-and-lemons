@@ -1263,3 +1263,12 @@ button:focus-visible,
     animation: none;
   }
 }
+
+.howto-story {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+  color: #6b5324;
+}

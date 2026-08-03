@@ -783,4 +783,24 @@ export class ValleyRenderer {
   get healProgress() {
     return this.heal
   }
+
+  /** Current gust strength, so the wind you hear matches the grass you see. */
+  get windStrength() {
+    return this.uniforms.uWindStrength.value
+  }
+
+  /**
+   * Camera position and heading on the ground plane, for panning world sounds.
+   * Written into `out` to keep the per-frame path allocation-free.
+   */
+  readListener(out: { x: number; z: number; forwardX: number; forwardZ: number }) {
+    const camera = this.followCamera.camera
+    out.x = camera.position.x
+    out.z = camera.position.z
+    // Third column of the camera's world matrix is its local +Z; forward is -Z.
+    const elements = camera.matrixWorld.elements
+    out.forwardX = -elements[8]
+    out.forwardZ = -elements[10]
+    return out
+  }
 }

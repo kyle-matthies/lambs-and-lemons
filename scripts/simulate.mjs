@@ -95,10 +95,17 @@ function playRound(minutes, seed) {
   return { state, counts, freedAt }
 }
 
-const minutesArg = Number(process.argv[2])
-const roundsArg = Number(process.argv[3])
-const lengths = Number.isFinite(minutesArg) ? [minutesArg] : [1, 2, 3]
-const rounds = Number.isFinite(roundsArg) ? roundsArg : 3
+const args = process.argv.slice(2)
+const assertMode = args.includes('--assert')
+const numbers = args.filter((arg) => !arg.startsWith('--')).map(Number)
+const lengths = Number.isFinite(numbers[0]) ? [numbers[0]] : [1, 2, 3]
+const rounds = Number.isFinite(numbers[1]) ? numbers[1] : 3
+
+const failures = []
+
+function check(condition, message) {
+  if (!condition) failures.push(message)
+}
 
 for (const minutes of lengths) {
   console.log(`\n=== ${minutes} minute round ===`)
@@ -118,5 +125,41 @@ for (const minutes of lengths) {
         `brewed=${counts.cupBrewed ?? 0}`,
       ].join('  '),
     )
+
+    if (!assertMode) continue
+
+    // Correctness, not taste: the loop must be completable and self-consistent.
+    check(state.phase === 'ended', `${minutes}min/${seed}: round never ended`)
+    check(state.stats.crittersFreed > 0, `${minutes}min/${seed}: nobody was served`)
+    check(
+      state.inventory.cups >= 0 && state.inventory.sparkleCups >= 0,
+      `${minutes}min/${seed}: cup counts went negative`,
+    )
+    check(
+      state.stats.crittersFreed <= state.critters.length,
+      `${minutes}min/${seed}: served more creatures than exist`,
+    )
+    if (state.outcome === 'valleyWoke') {
+      check(
+        state.stats.crittersFreed === state.critters.length,
+        `${minutes}min/${seed}: valley woke with creatures still lost`,
+      )
+      check(state.bloomCoverage > 0.999, `${minutes}min/${seed}: valley woke but colour < 100%`)
+    }
+    if (minutes >= 3) {
+      check(
+        state.outcome === 'valleyWoke',
+        `${minutes}min/${seed}: a ${minutes}-minute round should be winnable`,
+      )
+    }
   }
+}
+
+if (assertMode) {
+  if (failures.length > 0) {
+    console.error(`\n${failures.length} check(s) failed:`)
+    for (const failure of failures) console.error(`  - ${failure}`)
+    process.exit(1)
+  }
+  console.log('\nAll simulation checks passed.')
 }
