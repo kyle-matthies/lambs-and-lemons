@@ -1114,3 +1114,63 @@ button:focus-visible,
     height: 52px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Immersive 3D stage
+   The arcade mode fills the whole viewport instead of sitting in the phone
+   frame — a valley you look into, not a picture on a card. HUD and overlays
+   stay capped to a readable column so a wide monitor doesn't fling the numbers
+   into opposite corners.
+   --------------------------------------------------------------------------- */
+
+.game-shell.immersive {
+  background: #0d1a20;
+  overflow: hidden;
+}
+
+.phone-stage.world {
+  width: 100vw;
+  height: 100svh;
+  min-height: 0;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: #0d1a20;
+}
+
+/* In the immersive stage the mute button would sit right on top of Lammy, so it
+   moves up out of the play area. */
+.phone-stage.world .mute-control {
+  left: auto;
+  right: 18px;
+  top: calc(env(safe-area-inset-top) + 8px);
+  bottom: auto;
+  transform: none;
+}
+
+.phone-stage.world .hud {
+  left: 50%;
+  right: auto;
+  width: min(100%, 760px);
+  transform: translateX(-50%);
+}
+
+@media (min-width: 720px) {
+  .phone-stage.world {
+    width: 100vw;
+    height: 100svh;
+    border-radius: 0;
+  }
+
+  .phone-stage.world .controls-layer {
+    padding-inline: max(18px, calc((100vw - 1280px) / 2 + 18px));
+  }
+
+  .phone-stage.world .joystick {
+    left: max(18px, calc((100vw - 1280px) / 2 + 18px));
+  }
+
+  .phone-stage.world .smash-control {
+    right: max(18px, calc((100vw - 1280px) / 2 + 18px));
+  }
+}

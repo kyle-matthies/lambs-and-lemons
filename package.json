@@ -8,11 +8,14 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "shots": "node scripts/shoot.mjs .shots '?mode=arcade&go=1' 1280 800 arcade"
   },
   "dependencies": {
+    "@types/three": "^0.185.3",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

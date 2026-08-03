@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { loadGameAssets, type GameAssets } from '../assets'
-import { drawDecorations } from '../render'
+import { drawDecorations } from './decorations'
 import type { SoundManager } from '../../audio/sound'
 import type { DecorationId, TycoonSave } from '../../lib/storage'
 import {

@@ -11,9 +11,19 @@ export default defineConfig({
     // the environments this runs in (PLAYWRIGHT_BROWSERS_PATH ships Chromium).
     ...devices['iPhone 14'],
     browserName: 'chromium',
-    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
-      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
-      : {}),
+    launchOptions: {
+      // The game is WebGL now. Headless Chromium has no GPU, so force the
+      // SwiftShader software rasteriser or every canvas comes back blank.
+      args: [
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--ignore-gpu-blocklist',
+      ],
+      ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
+        : {}),
+    },
   },
   webServer: {
     command: 'npm run build && npm run preview -- --port 4173 --strictPort',

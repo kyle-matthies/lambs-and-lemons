@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
-import { assetPaths, loadGameAssets, type GameAssets } from './assets'
-import { createGame, drainEvents, resizeGame, swingHammer, takeSnapshot, updateGame } from './engine'
-import { createRenderFx, drawGame, processEvents, updateRenderFx } from './render'
+import { assetPaths } from './assets'
+import { createGame, drainEvents, swingHammer, takeSnapshot, updateGame } from './engine'
 import { useKeyboardInput } from './input'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
 import { GameHud, StartOverlay, EndOverlay } from './ArcadeOverlays'
+import { ValleyRenderer } from '../render/Renderer'
 import {
   readBestScores,
   readLeaderboard,
@@ -31,6 +31,7 @@ const emptySnapshot: GameSnapshot = {
   leaves: 0,
   nearStand: false,
   brewing: false,
+  brewProgress: 0,
   combo: 0,
   stats: {
     lemonsSmashed: 0,
@@ -59,36 +60,34 @@ export function GameCanvas({
   muted,
   onToggleMute,
   onExit,
-  decorations,
 }: {
   sound: SoundManager
   muted: boolean
   onToggleMute: () => void
   onExit: () => void
-  decorations: DecorationId[]
+  decorations?: DecorationId[]
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const assetsRef = useRef<GameAssets | null>(null)
+  const rendererRef = useRef<ValleyRenderer | null>(null)
   const gameRef = useRef<GameState | null>(null)
-  const fxRef = useRef(createRenderFx())
   const inputRef = useRef<GameInput>(EMPTY_INPUT)
   const joystickPointerRef = useRef<number | null>(null)
   const joystickActiveRef = useRef(false)
   const lastPhaseRef = useRef(emptySnapshot.phase)
   const bestRef = useRef<BestByRound>({})
   const soundRef = useRef(sound)
-  const decorationsRef = useRef(decorations)
+  const roundMinutesRef = useRef<RoundMinutes>(2)
   soundRef.current = sound
-  decorationsRef.current = decorations
 
-  const [assetsReady, setAssetsReady] = useState(false)
+  const [ready, setReady] = useState(false)
   const [roundMinutes, setRoundMinutes] = useState<RoundMinutes>(2)
   const [snapshot, setSnapshot] = useState<GameSnapshot>(emptySnapshot)
   const [stick, setStick] = useState({ active: false, x: 0, y: 0 })
   const [bestByRound, setBestByRound] = useState<BestByRound>({})
   const [isNewBest, setIsNewBest] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  roundMinutesRef.current = roundMinutes
 
   const bestForRound = useMemo(
     () => bestByRound[snapshot.roundMinutes] ?? { sold: 0, score: 0 },
@@ -102,43 +101,51 @@ export function GameCanvas({
     setLeaderboard(readLeaderboard())
   }, [])
 
+  // Build the valley once. Deferred by a frame so the loading panel actually
+  // paints before we spend ~100ms generating terrain, grass and flora.
   useEffect(() => {
-    let mounted = true
-    loadGameAssets().then((assets) => {
-      if (!mounted) return
-      assetsRef.current = assets
-      setAssetsReady(true)
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    let cancelled = false
+    const handle = requestAnimationFrame(() => {
+      if (cancelled) return
+      const params = new URLSearchParams(
+        typeof window === 'undefined' ? '' : window.location.search,
+      )
+      const autoStart = params.get('go') === '1'
+      const healParam = params.get('heal')
+      const game = createGame(roundMinutesRef.current, autoStart ? 'playing' : 'ready')
+      gameRef.current = game
+      lastPhaseRef.current = game.phase
+      try {
+        rendererRef.current = new ValleyRenderer(canvas, game, {
+          healOverride: healParam === null ? undefined : Number(healParam),
+        })
+      } catch (error) {
+        console.error('Unable to start the 3D renderer', error)
+        return
+      }
+      setSnapshot(takeSnapshot(game))
+      setReady(true)
     })
 
     return () => {
-      mounted = false
+      cancelled = true
+      cancelAnimationFrame(handle)
+      rendererRef.current?.dispose()
+      rendererRef.current = null
     }
   }, [])
 
+  // Keep the drawing buffer matched to the stage element.
   useEffect(() => {
-    const canvas = canvasRef.current
     const stage = stageRef.current
-    if (!canvas || !stage) return
+    if (!stage) return
 
     const resize = () => {
       const rect = stage.getBoundingClientRect()
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.round(rect.width * dpr)
-      canvas.height = Math.round(rect.height * dpr)
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
-      const context = canvas.getContext('2d')
-      if (!context) return
-      context.setTransform(dpr, 0, 0, dpr, 0, 0)
-
-      if (!gameRef.current) {
-        gameRef.current = createGame(rect.width, rect.height, roundMinutes, 'ready')
-      } else {
-        resizeGame(gameRef.current, rect.width, rect.height)
-      }
-      setSnapshot(takeSnapshot(gameRef.current))
-      const assets = assetsRef.current
-      if (assets) drawGame(context, gameRef.current, assets, fxRef.current, decorationsRef.current)
+      rendererRef.current?.setSize(rect.width, rect.height)
     }
 
     resize()
@@ -149,10 +156,10 @@ export function GameCanvas({
       observer.disconnect()
       window.removeEventListener('orientationchange', resize)
     }
-  }, [roundMinutes])
+  }, [ready])
 
   useEffect(() => {
-    if (!assetsReady) return
+    if (!ready) return
 
     let frame = 0
     let lastTime = performance.now()
@@ -160,25 +167,23 @@ export function GameCanvas({
 
     const tick = (now: number) => {
       const state = gameRef.current
-      const assets = assetsRef.current
-      const canvas = canvasRef.current
-      const context = canvas?.getContext('2d')
-      const dt = Math.min(0.04, (now - lastTime) / 1000)
+      const renderer = rendererRef.current
+      const dt = Math.min(0.05, (now - lastTime) / 1000)
       lastTime = now
 
-      if (state && assets && context) {
+      if (state && renderer) {
         updateGame(state, inputRef.current, dt)
 
         const events = drainEvents(state)
         if (events.length > 0) {
-          processEvents(fxRef.current, events)
-          events.forEach((event) => {
+          renderer.handleEvents(events, state)
+          for (const event of events) {
             const sfx = EVENT_SOUNDS[event.type]
             if (sfx) soundRef.current.play(sfx)
             if (event.type === 'cupSold') {
               soundRef.current.play(event.sparkle ? 'sparkle' : 'ding')
             }
-          })
+          }
         }
 
         if (state.phase === 'ended' && lastPhaseRef.current !== 'ended') {
@@ -206,8 +211,8 @@ export function GameCanvas({
           setStick({ active: false, x: 0, y: 0 })
         }
         lastPhaseRef.current = state.phase
-        updateRenderFx(fxRef.current, dt)
-        drawGame(context, state, assets, fxRef.current, decorationsRef.current)
+
+        renderer.frame(state, dt)
         if (now - lastUiTime > 90) {
           setSnapshot(takeSnapshot(state))
           lastUiTime = now
@@ -219,16 +224,12 @@ export function GameCanvas({
 
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [assetsReady])
+  }, [ready])
 
   const startRound = () => {
-    const stage = stageRef.current
-    const rect = stage?.getBoundingClientRect()
-    const width = rect?.width ?? 390
-    const height = rect?.height ?? 844
-    const game = createGame(width, height, roundMinutes, 'playing')
+    const game = createGame(roundMinutesRef.current, 'playing')
     gameRef.current = game
-    fxRef.current = createRenderFx()
+    rendererRef.current?.reset(game)
     lastPhaseRef.current = 'playing'
     inputRef.current = EMPTY_INPUT
     joystickActiveRef.current = false
@@ -240,13 +241,14 @@ export function GameCanvas({
 
   const handleRoundChange = (minutes: RoundMinutes) => {
     setRoundMinutes(minutes)
+    roundMinutesRef.current = minutes
     sound.play('tap')
     const current = gameRef.current
     if (!current || current.phase !== 'ready') return
-
-    const game = createGame(current.width, current.height, minutes, 'ready')
-    gameRef.current = game
-    setSnapshot(takeSnapshot(game))
+    current.roundMinutes = minutes
+    current.timeLeft = minutes * 60
+    current.lastWholeSecond = minutes * 60
+    setSnapshot(takeSnapshot(current))
   }
 
   const handleSwing = useCallback(() => {
@@ -286,12 +288,12 @@ export function GameCanvas({
   }
 
   return (
-    <main className="game-shell">
-      <section className="phone-stage" ref={stageRef} aria-label="Lammy's Lemonade Smash arcade">
+    <main className="game-shell immersive">
+      <section className="phone-stage world" ref={stageRef} aria-label="Lambs & Lemons: The Sour Valley">
         <canvas className="game-canvas" ref={canvasRef} aria-hidden="true" />
         <GameHud snapshot={snapshot} best={bestForRound} />
 
-        {!assetsReady && <div className="loading-panel">Loading</div>}
+        {!ready && <div className="loading-panel">Growing the valley…</div>}
 
         {snapshot.phase === 'ready' && (
           <StartOverlay
