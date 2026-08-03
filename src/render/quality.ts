@@ -17,6 +17,10 @@ export interface QualitySettings {
   maxParticles: number
   /** Airborne pollen / fireflies. */
   motes: number
+  /** Butterflies over the meadow; they arrive as the colour comes back. */
+  butterflies: number
+  /** Birds wheeling over the tree line. */
+  birds: number
   /** Anisotropy request for the few tiled textures we generate. */
   anisotropy: number
 }
@@ -35,6 +39,8 @@ const PRESETS: Record<QualityTier, Omit<QualitySettings, 'tier'>> = {
     waterReflections: false,
     maxParticles: 220,
     motes: 40,
+    butterflies: 10,
+    birds: 5,
     anisotropy: 1,
   },
   medium: {
@@ -50,6 +56,8 @@ const PRESETS: Record<QualityTier, Omit<QualitySettings, 'tier'>> = {
     waterReflections: false,
     maxParticles: 520,
     motes: 140,
+    butterflies: 20,
+    birds: 8,
     anisotropy: 4,
   },
   high: {
@@ -65,6 +73,8 @@ const PRESETS: Record<QualityTier, Omit<QualitySettings, 'tier'>> = {
     waterReflections: true,
     maxParticles: 900,
     motes: 240,
+    butterflies: 30,
+    birds: 11,
     anisotropy: 8,
   },
 }

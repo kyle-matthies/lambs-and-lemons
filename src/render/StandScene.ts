@@ -37,7 +37,7 @@ import {
 } from './quality'
 import { Sky } from './sky'
 import { TERRAIN_TIERS, createTerrain } from './terrain'
-import { makeDetailTexture } from './textures'
+import { makeDetailTexture, makeRadialAlphaTexture } from './textures'
 import { createValleyUniforms } from './valleyShading'
 
 /**
@@ -96,6 +96,7 @@ export class StandScene {
   private readonly uniforms = createValleyUniforms()
   private readonly bloomMap = new BloomMap(256)
   private readonly detail: Texture
+  private readonly alpha: Texture
   private readonly world: World
   private readonly sky = new Sky()
   private readonly horizon: Horizon
@@ -142,6 +143,7 @@ export class StandScene {
     this.world = createWorld(seed)
     const layout = generateGroveLayout(this.world, 12)
 
+    this.alpha = makeRadialAlphaTexture(96, 2.4)
     this.detail = makeDetailTexture(256, seed, 0.26)
     this.detail.anisotropy = Math.min(
       this.settings.anisotropy,
@@ -284,7 +286,7 @@ export class StandScene {
       trailTimer: 0,
       hue: 0.5,
     }
-    this.herd = new CritterHerd([this.customer], this.uniforms, this.detail)
+    this.herd = new CritterHerd([this.customer], this.uniforms, this.detail, this.alpha)
     this.scene.add(this.herd.group)
 
     this.particles = new ParticleField(Math.min(220, this.settings.maxParticles))
@@ -393,7 +395,11 @@ export class StandScene {
 
     // Happy customers bounce; the rest just breathe.
     this.customer.state = 'follower'
-    this.herd.update([this.customer], dt, view.phase === 'happy' ? this.time * 2.4 : this.time)
+    this.herd.update([this.customer], dt, view.phase === 'happy' ? this.time * 2.4 : this.time, {
+      camera: this.camera,
+      playerX: this.keeper.x,
+      playerZ: this.keeper.z,
+    })
 
     // Lammy leans over the counter while serving, and bobs the rest of the time.
     const busy = view.phase === 'serving' || view.phase === 'change'
@@ -436,6 +442,7 @@ export class StandScene {
       if (child instanceof Mesh) child.geometry.dispose()
     })
     this.detail.dispose()
+    this.alpha.dispose()
     this.renderer.dispose()
   }
 }
