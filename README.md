@@ -104,6 +104,7 @@ Handy URL parameters:
 | `?mode=arcade\|stand` | Open a mode directly |
 | `&go=1` | Skip the round-setup card |
 | `&heal=0..1` | Pin how far the valley has recovered — for looking at the art at both ends of the range |
+| `&dusk=0..1` | Pin how far through the round the light is, so the sunset can be looked at without waiting for it |
 | `&flock=N` | Start with N creatures already following, which is otherwise the hardest thing in the game to get a look at |
 | `&over=woke\|sunset` | Open straight onto the round-over card |
 

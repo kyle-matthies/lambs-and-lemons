@@ -7,6 +7,7 @@ import {
   Group,
   HemisphereLight,
   Mesh,
+  MeshStandardMaterial,
   PCFSoftShadowMap,
   Scene,
   SRGBColorSpace,
@@ -15,7 +16,7 @@ import {
   type BufferGeometry,
   type Texture,
 } from 'three'
-import { clamp01, damp, easeOutBack, lerp, smoothstep } from '../core/math'
+import { clamp01, damp, easeOutBack, smoothstep } from '../core/math'
 import {
   MAX_GROUND_LEAVES,
   MAX_GROUND_LEMONS,
@@ -29,6 +30,7 @@ import type { DecorationId } from '../lib/storage'
 import { BLOOM_AREA, BLOOM_ORIGIN } from '../game/bloom'
 import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
+import { createDaylightState, evaluateDaylight } from './daylight'
 import { CritterHerd } from './critters'
 import { Floaters } from './floaters'
 import { ParticleField, ZestRings } from './fx'
@@ -36,7 +38,7 @@ import {
   buildTreeGeometry,
   createBushes,
   createFlowers,
-  createFoliageMaterial,
+  createFoliageMaterials,
   createReeds,
   createRocks,
   type TreeGeometrySet,
@@ -44,11 +46,13 @@ import {
 import { createGrass } from './grass'
 import { Horizon } from './horizon'
 import { Lamb } from './lamb'
+import { Motes } from './motes'
 import { PALETTE, SOUR_TINT } from './palette'
 import { PostPipeline } from './postfx'
 import { ItemField, createBlobShadow, createDecorations, createStand, setDecorations } from './props'
 import {
   detectQualityTier,
+  isSoftwareRenderer,
   prefersReducedMotion,
   settingsFor,
   stepTier,
@@ -70,8 +74,7 @@ import { Water } from './water'
  * list of events each frame; everything here is presentation.
  */
 
-// Up, to the right, and slightly *toward* the camera's side of the valley, so
-// trunks and Lammy's face catch the key instead of being silhouetted.
+// Where the sun starts. It moves: see `daylight.ts`.
 const SUN_DIRECTION = new Vector3(0.52, 0.62, 0.58).normalize()
 
 interface TreeVisual {
@@ -81,6 +84,10 @@ interface TreeVisual {
   baseScale: number
   /** 1 = solid, 0 = fully dissolved. Driven by camera occlusion. */
   fade: { value: number }
+  solid: MeshStandardMaterial
+  dissolving: MeshStandardMaterial
+  /** Which material the meshes currently carry, so we only swap on a change. */
+  usingDissolve: boolean
 }
 
 /** Radius around the camera→player line inside which a tree dissolves. */
@@ -100,6 +107,11 @@ export interface ValleyRendererOptions {
    * of the range without playing a whole round.
    */
   healOverride?: number
+  /**
+   * Pin how far through the round the light is, ignoring the clock. Set from
+   * `?dusk=` so the sunset can be inspected without waiting two minutes for it.
+   */
+  duskOverride?: number
   /**
    * Start with the whole valley already in colour. The menu backdrop shows the
    * valley as it *could* be; the round itself always starts drained.
@@ -125,6 +137,7 @@ export class ValleyRenderer {
   private readonly zestRings = new ZestRings(14)
   private readonly swingTrail = new SwingTrail()
   private readonly floaters: Floaters | null
+  private readonly motes: Motes
   private readonly lamb: Lamb
   private critterHerd: CritterHerd | null = null
   private lambShadow: Mesh
@@ -145,8 +158,12 @@ export class ValleyRenderer {
   private adaptiveTimer = 0
   private readonly adaptive: boolean
   private readonly healOverride: number | null
+  private readonly duskOverride: number | null
   private readonly bloomFlooded: boolean
   private calmMotion = false
+  private readonly daylight = createDaylightState()
+  /** 0 → 1 across the round. Held at 0 outside play so menus stay at noon. */
+  private dusk = 0
   private decorations: Group | null = null
   private readonly ownedDecorations: DecorationId[]
   private disposed = false
@@ -160,6 +177,7 @@ export class ValleyRenderer {
     this.adaptive = options.adaptive ?? true
     this.floaters = options.floaterLayer ? new Floaters(options.floaterLayer) : null
     this.healOverride = options.healOverride ?? null
+    this.duskOverride = options.duskOverride ?? null
     this.bloomFlooded = options.bloomFlooded ?? false
     this.ownedDecorations = options.decorations ?? []
     this.settings = settingsFor(options.tier ?? detectQualityTier())
@@ -170,6 +188,12 @@ export class ValleyRenderer {
       powerPreference: 'high-performance',
       stencil: false,
     })
+    // The device heuristic can't see the renderer, so correct it once we can:
+    // a CPU rasteriser has none of the fill rate the "high" tier assumes.
+    if (options.tier === undefined && isSoftwareRenderer(this.renderer.getContext())) {
+      this.settings = settingsFor('low')
+    }
+
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.08
@@ -222,6 +246,7 @@ export class ValleyRenderer {
     // --- world ----------------------------------------------------------------
     this.scene.add(this.worldGroup)
     this.particles = new ParticleField(this.settings.maxParticles)
+    this.motes = new Motes({ count: this.settings.motes, radius: 22 }, this.alphaTexture)
     this.lamb = new Lamb(this.uniforms, this.detailTexture)
     this.lamb.group.scale.setScalar(1.22)
     this.lambShadow = createBlobShadow(this.alphaTexture, 1.5)
@@ -234,6 +259,7 @@ export class ValleyRenderer {
     this.scene.add(this.particles.glowMesh)
     this.scene.add(this.zestRings.group)
     this.scene.add(this.swingTrail.mesh)
+    this.scene.add(this.motes.mesh)
 
     // Respect the OS motion preference: no camera shake, gentler screen flashes.
     this.calmMotion = prefersReducedMotion()
@@ -241,6 +267,43 @@ export class ValleyRenderer {
 
     this.followCamera.reset(state.player.x, state.player.y, state.player.z, state.world)
     this.seedInitialBloom(state)
+    this.warmUpShaders()
+  }
+
+  /**
+   * Compile every program before the first frame.
+   *
+   * Otherwise the first tree to dissolve, the first particle burst and the first
+   * zest ring each trigger a shader compile mid-play, which on a big scene is a
+   * visible hitch at exactly the moment the player did something. The dissolving
+   * foliage material isn't attached to anything yet, so it gets swapped in for a
+   * single tree just long enough to be compiled.
+   */
+  private warmUpShaders() {
+    const sample = this.treeVisuals[0]
+    if (sample) {
+      sample.full.material = sample.dissolving
+      sample.stump.material = sample.dissolving
+    }
+
+    // These pool meshes sit at count 0 and would otherwise compile on first use.
+    const particleCounts = [this.particles.solidMesh.count, this.particles.glowMesh.count]
+    this.particles.solidMesh.count = 1
+    this.particles.glowMesh.count = 1
+
+    try {
+      this.renderer.compile(this.scene, this.followCamera.camera)
+    } catch (error) {
+      // Warming up is an optimisation, never a requirement.
+      console.warn('Shader warm-up skipped', error)
+    }
+
+    this.particles.solidMesh.count = particleCounts[0]
+    this.particles.glowMesh.count = particleCounts[1]
+    if (sample) {
+      sample.full.material = sample.solid
+      sample.stump.material = sample.solid
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -300,16 +363,16 @@ export class ValleyRenderer {
     for (const tree of state.trees) {
       const set = this.treeGeometries[tree.variant % this.treeGeometries.length]
       const fade = { value: 1 }
-      const foliage = createFoliageMaterial(this.uniforms, this.detailTexture, fade)
+      const { solid, dissolving } = createFoliageMaterials(this.uniforms, this.detailTexture, fade)
 
       const group = new Group()
       group.position.set(tree.x, tree.y, tree.z)
       group.rotation.y = tree.rotation
 
-      const full = new Mesh(set.full, foliage)
+      const full = new Mesh(set.full, solid)
       full.castShadow = true
       full.receiveShadow = true
-      const stump = new Mesh(set.stump, foliage)
+      const stump = new Mesh(set.stump, solid)
       stump.castShadow = true
       stump.receiveShadow = true
       stump.visible = false
@@ -317,7 +380,16 @@ export class ValleyRenderer {
       group.add(full, stump)
       this.worldGroup.add(group)
 
-      this.treeVisuals.push({ group, full, stump, baseScale: tree.scale, fade })
+      this.treeVisuals.push({
+        group,
+        full,
+        stump,
+        baseScale: tree.scale,
+        fade,
+        solid,
+        dissolving,
+        usingDissolve: false,
+      })
     }
 
     const stand = createStand(this.uniforms, this.detailTexture)
@@ -388,6 +460,7 @@ export class ValleyRenderer {
     this.zestRings.clear()
     this.floaters?.clear()
     this.heal = 0
+    this.dusk = 0
     this.time = 0
 
     for (const visual of this.treeVisuals) {
@@ -404,6 +477,7 @@ export class ValleyRenderer {
 
     this.followCamera.reset(state.player.x, state.player.y, state.player.z, state.world)
     this.seedInitialBloom(state)
+    this.warmUpShaders()
   }
 
   setQualityTier(tier: QualityTier) {
@@ -684,8 +758,19 @@ export class ValleyRenderer {
     // --- shared uniforms ------------------------------------------------------
     // Front-load the curve so the first few smashes visibly change the weather —
     // the feedback has to arrive early or the mechanic reads as decoration.
+    // Pinned values snap: the debug links exist to look at a specific state, not
+    // to watch it ease toward one.
     const healTarget = this.healOverride ?? Math.pow(clamp01(state.bloomCoverage), 0.55)
-    this.heal = damp(this.heal, healTarget, 1.6, dt)
+    this.heal = this.healOverride ?? damp(this.heal, healTarget, 1.6, dt)
+
+    // The HUD calls the timer "Sunset", so the light had better agree with it.
+    // Once the valley wakes the sun climbs back up instead of going down.
+    const total = Math.max(1, state.roundMinutes * 60)
+    const elapsed = state.phase === 'ready' ? 0 : clamp01(1 - state.timeLeft / total)
+    const duskTarget = state.outcome === 'valleyWoke' ? 0 : elapsed
+    this.dusk =
+      this.duskOverride ??
+      damp(this.dusk, duskTarget, state.outcome === 'valleyWoke' ? 0.9 : 6, dt)
     this.applyDaylight()
     this.uniforms.uTime.value = this.time
     this.uniforms.uPlayerPos.value.set(state.player.x, state.player.y, state.player.z)
@@ -712,11 +797,19 @@ export class ValleyRenderer {
     this.updateTrees(state, dt)
 
     this.particles.update(dt, (x, z) => state.world.heightAt(x, z))
+    this.motes.update(
+      this.followCamera.camera,
+      dt,
+      this.time,
+      this.daylight.duskGlow,
+      this.uniforms.uWindStrength.value,
+    )
     this.zestRings.update(dt)
     this.water?.update(this.time, this.heal)
     this.sky.update(this.time, 0.35 + this.heal * 0.65, this.followCamera.camera.position)
     this.horizon.update(
       this.heal,
+      this.dusk,
       this.tmpColor.copy(SOUR_TINT),
       this.followCamera.camera.position.x,
       this.followCamera.camera.position.z,
@@ -743,13 +836,13 @@ export class ValleyRenderer {
     // The translucency term needs the sun in view space, so it has to be refreshed
     // after the camera has settled for this frame.
     this.uniforms.uSunViewDirection.value
-      .copy(SUN_DIRECTION)
+      .copy(this.daylight.direction)
       .transformDirection(this.followCamera.camera.matrixWorldInverse)
 
     // Keep the shadow frustum centred just ahead of Lammy.
     this.tmp.set(state.player.x, state.player.y, state.player.z)
     this.sun.target.position.copy(this.tmp)
-    this.sun.position.copy(this.tmp).addScaledVector(SUN_DIRECTION, 45)
+    this.sun.position.copy(this.tmp).addScaledVector(this.daylight.direction, 45)
     this.sun.target.updateMatrixWorld()
 
     // --- draw ----------------------------------------------------------------
@@ -769,26 +862,32 @@ export class ValleyRenderer {
   }
 
   /**
-   * Drive the whole lighting rig off `heal`. This is the payoff of the entire
-   * design: as colour comes back into the valley, the sun literally comes out.
+   * Drive the whole lighting rig off recovery *and* the clock. This is the payoff
+   * of the entire design: colour coming back brings the sun out, and the round
+   * running down takes it away again.
    */
   private applyDaylight() {
-    const heal = this.heal
+    const light = evaluateDaylight(this.heal, this.dusk, this.daylight)
 
-    this.sun.intensity = lerp(1.6, 2.5, heal)
-    this.sun.color.copy(PALETTE.sourSun).lerp(PALETTE.sunLight, heal)
+    this.sun.color.copy(light.sunColor)
+    this.sun.intensity = light.sunIntensity
 
-    this.hemisphere.intensity = lerp(0.85, 0.92, heal)
-    this.hemisphere.color.copy(PALETTE.sourSky).lerp(PALETTE.skyHorizon, heal)
-    this.hemisphere.groundColor.copy(PALETTE.sourBounce).lerp(PALETTE.bounceLight, heal)
+    this.hemisphere.color.copy(light.hemisphereSky)
+    this.hemisphere.groundColor.copy(light.hemisphereGround)
+    this.hemisphere.intensity = light.hemisphereIntensity
 
-    // Haze retreats to the hills as the valley recovers.
-    this.fog.color.copy(PALETTE.sourFog).lerp(PALETTE.fog, heal)
-    this.fog.near = lerp(24, 46, heal)
-    this.fog.far = lerp(78, 138, heal)
+    this.fog.color.copy(light.fogColor)
+    this.fog.near = light.fogNear
+    this.fog.far = light.fogFar
 
-    this.renderer.toneMappingExposure = lerp(1.16, 1.2, heal)
-    this.uniforms.uRimStrength.value = lerp(0.14, 0.26, heal)
+    this.renderer.toneMappingExposure = light.exposure
+    this.uniforms.uRimStrength.value = light.rimStrength
+
+    // The sun actually moves, so everything that reads its direction has to be
+    // told: the sky dome's disc and glow, and the water's glint.
+    this.sky.setSunDirection(light.direction)
+    this.sky.setColors(light.skyZenith, light.skyHorizon, light.skyGlow)
+    this.water?.setSunDirection(light.direction)
   }
 
   /** Screen flash, damped for players who asked for reduced motion. */
@@ -822,6 +921,15 @@ export class ValleyRenderer {
         fadeTarget = smoothstep(OCCLUSION_RADIUS * 0.45, OCCLUSION_RADIUS, offset) * 0.78 + 0.22
       }
       visual.fade.value = damp(visual.fade.value, fadeTarget, 9, dt)
+
+      // Only carry the dithering material while actually dissolving.
+      const needsDissolve = visual.fade.value < 0.995
+      if (needsDissolve !== visual.usingDissolve) {
+        visual.usingDissolve = needsDissolve
+        const material = needsDissolve ? visual.dissolving : visual.solid
+        visual.full.material = material
+        visual.stump.material = material
+      }
 
       const broken = tree.stage === 'broken'
       visual.full.visible = !broken
@@ -869,6 +977,7 @@ export class ValleyRenderer {
     this.post?.dispose()
     this.bloomMap.dispose()
     this.particles.dispose()
+    this.motes.dispose()
     this.zestRings.dispose()
     this.swingTrail.dispose()
     this.floaters?.dispose()

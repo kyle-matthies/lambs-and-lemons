@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  BufferAttribute,
   Color,
   DoubleSide,
   Group,
@@ -76,7 +77,14 @@ export class ParticleField {
 
   constructor(capacity: number) {
     this.capacity = capacity
+    // Explicit white vertex colours: `vertexColors` makes the shader read a
+    // `color` attribute regardless, and relying on the driver's default for a
+    // missing one is needless risk.
     const geometry = new IcosahedronGeometry(0.5, 0)
+    geometry.setAttribute(
+      'color',
+      new BufferAttribute(new Float32Array(geometry.attributes.position.count * 3).fill(1), 3),
+    )
 
     const solidMaterial = new MeshBasicMaterial({ vertexColors: true, toneMapped: true })
     this.solidMesh = new InstancedMesh(geometry, solidMaterial, capacity)

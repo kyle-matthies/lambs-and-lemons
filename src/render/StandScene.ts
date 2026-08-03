@@ -21,14 +21,20 @@ import { createWorld, generateGroveLayout, STAND_POSITION, type World } from '..
 import { BloomMap } from './bloomMap'
 import { CritterHerd } from './critters'
 import { ParticleField } from './fx'
-import { buildTreeGeometry, createBushes, createFlowers, createFoliageMaterial } from './flora'
+import { buildTreeGeometry, createBushes, createFlowers, createFoliageMaterials } from './flora'
 import { createGrass } from './grass'
 import { Horizon } from './horizon'
 import { Lamb } from './lamb'
 import { PALETTE } from './palette'
 import { PostPipeline } from './postfx'
 import { createDecorations, createStand, setDecorations } from './props'
-import { detectQualityTier, settingsFor, type QualitySettings, type QualityTier } from './quality'
+import {
+  detectQualityTier,
+  isSoftwareRenderer,
+  settingsFor,
+  type QualitySettings,
+  type QualityTier,
+} from './quality'
 import { Sky } from './sky'
 import { TERRAIN_TIERS, createTerrain } from './terrain'
 import { makeDetailTexture } from './textures'
@@ -86,7 +92,7 @@ export class StandScene {
   readonly scene = new Scene()
   readonly camera = new PerspectiveCamera(38, 1, 0.3, 700)
 
-  private readonly settings: QualitySettings
+  private settings: QualitySettings
   private readonly uniforms = createValleyUniforms()
   private readonly bloomMap = new BloomMap(256)
   private readonly detail: Texture
@@ -123,6 +129,10 @@ export class StandScene {
       powerPreference: 'high-performance',
       stencil: false,
     })
+    if (tier === undefined && isSoftwareRenderer(this.renderer.getContext())) {
+      this.settings = settingsFor('low')
+    }
+
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.14
@@ -194,8 +204,9 @@ export class StandScene {
 
     const treeSet = buildTreeGeometry(seed, 0)
     for (const spot of layout.trees.slice(0, 5)) {
-      const foliage = createFoliageMaterial(this.uniforms, this.detail, { value: 1 })
-      const tree = new Mesh(treeSet.full, foliage)
+      // Nothing occludes the fixed camera here, so the plain material is enough.
+      const foliage = createFoliageMaterials(this.uniforms, this.detail, { value: 1 })
+      const tree = new Mesh(treeSet.full, foliage.solid)
       tree.castShadow = true
       tree.receiveShadow = true
       tree.position.set(spot.x, spot.y, spot.z)
@@ -401,7 +412,7 @@ export class StandScene {
 
     this.particles.update(dt, (x, z) => this.world.heightAt(x, z))
     this.sky.update(this.time, 1, this.camera.position)
-    this.horizon.update(1, PALETTE.fog, this.camera.position.x, this.camera.position.z)
+    this.horizon.update(1, 0, PALETTE.fog, this.camera.position.x, this.camera.position.z)
 
     this.bloomMap.render(this.renderer)
     if (this.post && this.settings.postProcessing) {

@@ -116,26 +116,24 @@ uniform float uLocalHeal;
 const FADE_DECLARATION = /* glsl */ `
 uniform float uFade;
 
-// 4x4 ordered Bayer threshold — cheap, stable under camera motion, and it reads
-// as a soft dissolve rather than a shimmer.
+// 4x4 ordered Bayer threshold, built by the standard recursive construction as
+// pure arithmetic. The obvious version — a 16-entry array indexed in a loop —
+// costs a dynamic-indexed lookup on *every foliage fragment* and tanked the
+// frame rate; this is a dozen ALU ops with no branches and no array.
+float vlyBayer2( vec2 a ) {
+  vec2 p = floor( mod( a, 2.0 ) );
+  return 2.0 * p.x + 3.0 * p.y - 4.0 * p.x * p.y;
+}
+
 float vlyDither( vec2 coord ) {
-  int x = int( mod( coord.x, 4.0 ) );
-  int y = int( mod( coord.y, 4.0 ) );
-  int index = x + y * 4;
-  float threshold[16];
-  threshold[0]  = 0.0625; threshold[1]  = 0.5625; threshold[2]  = 0.1875; threshold[3]  = 0.6875;
-  threshold[4]  = 0.8125; threshold[5]  = 0.3125; threshold[6]  = 0.9375; threshold[7]  = 0.4375;
-  threshold[8]  = 0.2500; threshold[9]  = 0.7500; threshold[10] = 0.1250; threshold[11] = 0.6250;
-  threshold[12] = 1.0000; threshold[13] = 0.5000; threshold[14] = 0.8750; threshold[15] = 0.3750;
-  for ( int i = 0; i < 16; i ++ ) {
-    if ( i == index ) return threshold[i];
-  }
-  return 0.5;
+  return ( vlyBayer2( coord ) * 4.0 + vlyBayer2( coord * 0.5 ) ) / 16.0;
 }
 `
 
 const FADE_CHUNK = /* glsl */ `
-  if ( uFade < 0.999 && uFade < vlyDither( gl_FragCoord.xy ) ) discard;
+  if ( uFade < 0.999 ) {
+    if ( uFade < vlyDither( gl_FragCoord.xy ) ) discard;
+  }
 `
 
 function projectChunk(options: ValleyShadingOptions) {

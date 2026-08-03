@@ -169,6 +169,7 @@ export function GameCanvas({
       const autoStart = params.get('go') === '1'
       const savedQuality = readQuality()
       const healParam = params.get('heal')
+      const duskParam = params.get('dusk')
       const game = createGame(roundMinutesRef.current, autoStart ? 'playing' : 'ready')
       const flockParam = Number(params.get('flock'))
       if (Number.isFinite(flockParam) && flockParam > 0) preFreeCritters(game, flockParam)
@@ -181,6 +182,7 @@ export function GameCanvas({
       try {
         rendererRef.current = new ValleyRenderer(canvas, game, {
           healOverride: healParam === null ? undefined : Number(healParam),
+          duskOverride: duskParam === null ? undefined : Number(duskParam),
           floaterLayer: floaterLayerRef.current,
           decorations: decorationsRef.current,
           tier: savedQuality === 'auto' ? undefined : savedQuality,

@@ -15,6 +15,8 @@ export interface QualitySettings {
   depthOfField: boolean
   waterReflections: boolean
   maxParticles: number
+  /** Airborne pollen / fireflies. */
+  motes: number
   /** Anisotropy request for the few tiled textures we generate. */
   anisotropy: number
 }
@@ -32,6 +34,7 @@ const PRESETS: Record<QualityTier, Omit<QualitySettings, 'tier'>> = {
     depthOfField: false,
     waterReflections: false,
     maxParticles: 220,
+    motes: 40,
     anisotropy: 1,
   },
   medium: {
@@ -46,6 +49,7 @@ const PRESETS: Record<QualityTier, Omit<QualitySettings, 'tier'>> = {
     depthOfField: false,
     waterReflections: false,
     maxParticles: 520,
+    motes: 140,
     anisotropy: 4,
   },
   high: {
@@ -60,6 +64,7 @@ const PRESETS: Record<QualityTier, Omit<QualitySettings, 'tier'>> = {
     depthOfField: true,
     waterReflections: true,
     maxParticles: 900,
+    motes: 240,
     anisotropy: 8,
   },
 }
@@ -92,6 +97,30 @@ export function detectQualityTier(): QualityTier {
 /** True when the player has asked the OS to keep animation calm. */
 export function prefersReducedMotion() {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/**
+ * True when WebGL is being rasterised on the CPU — SwiftShader, llvmpipe, Mesa's
+ * software path. Happens in VMs, on locked-down machines, and in headless
+ * browsers. These render two or three orders of magnitude slower than a GPU, so
+ * the device heuristic (which sees plenty of cores and guesses "high") is
+ * exactly backwards for them.
+ */
+export function isSoftwareRenderer(gl: WebGLRenderingContext | WebGL2RenderingContext) {
+  try {
+    const debug = gl.getExtension('WEBGL_debug_renderer_info')
+    const name = String(
+      debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+    ).toLowerCase()
+    return (
+      name.includes('swiftshader') ||
+      name.includes('llvmpipe') ||
+      name.includes('softwarerasterizer') ||
+      name.includes('software rasterizer')
+    )
+  } catch {
+    return false
+  }
 }
 
 export const TIER_ORDER: QualityTier[] = ['low', 'medium', 'high']

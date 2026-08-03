@@ -162,29 +162,37 @@ export function buildTreeGeometry(seed: number, variant: number): TreeGeometrySe
 }
 
 /**
- * One material per tree, each with its own `uFade`, so a tree that wanders
- * between the camera and Lammy can dissolve out of the way on its own. They all
- * compile to the same program, so the extra materials cost nothing but a uniform.
+ * A tree needs two materials, not one.
+ *
+ * The dissolve is done with `discard`, and a shader containing `discard` loses
+ * early-Z for *every* fragment it draws — including the overwhelming majority of
+ * frames where the tree isn't fading at all. So each tree gets a plain opaque
+ * material and a dithering one, and swaps to the dithering one only while it's
+ * actually in the way. Measured at ~8 ms a frame back on a full-screen grove.
  */
-export function createFoliageMaterial(
+export function createFoliageMaterials(
   uniforms: ValleyUniforms,
   detail: Texture,
   fade: IUniform<number>,
 ) {
-  const material = new MeshStandardMaterial({
-    vertexColors: true,
-    map: detail,
-    roughness: 0.82,
-    metalness: 0,
-  })
-  applyValleyShading(material, uniforms, {
-    wind: 0.16,
-    swayAttribute: true,
-    bloom: true,
-    rim: 1,
-    fade,
-  })
-  return material
+  const build = (dissolving: boolean) => {
+    const material = new MeshStandardMaterial({
+      vertexColors: true,
+      map: detail,
+      roughness: 0.82,
+      metalness: 0,
+    })
+    applyValleyShading(material, uniforms, {
+      wind: 0.16,
+      swayAttribute: true,
+      bloom: true,
+      rim: 1,
+      ...(dissolving ? { fade } : {}),
+    })
+    return material
+  }
+
+  return { solid: build(false), dissolving: build(true) }
 }
 
 // ---------------------------------------------------------------------------

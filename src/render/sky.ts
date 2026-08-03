@@ -155,6 +155,13 @@ export class Sky {
   }
 
 
+  /** Retint the dome. Driven by the day cycle, so it changes every frame. */
+  setColors(zenith: Color, horizon: Color, glow: Color) {
+    ;(this.material.uniforms.uZenith.value as Color).copy(zenith)
+    ;(this.material.uniforms.uHorizon.value as Color).copy(horizon)
+    ;(this.material.uniforms.uGlow.value as Color).copy(glow)
+  }
+
   update(time: number, heal: number, cameraPosition: Vector3) {
     this.material.uniforms.uTime.value = time
     this.material.uniforms.uHeal.value = heal

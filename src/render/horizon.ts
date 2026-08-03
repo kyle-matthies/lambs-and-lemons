@@ -23,6 +23,9 @@ interface RidgeLayer {
   base: number
 }
 
+/** Where the ridges go at sunset — the warm band that sits under the sky. */
+const DUSK_TINT = new Color('#e8a678')
+
 const LAYERS: RidgeLayer[] = [
   { radius: 128, height: 13, roughness: 1.35, color: '#7d9db9', base: -8 },
   { radius: 196, height: 21, roughness: 1, color: '#9cbcd4', base: -11 },
@@ -109,10 +112,12 @@ export class Horizon {
   }
 
   /**
-   * Ridges drain toward the sour haze along with everything else, then warm back
-   * up as the valley recovers.
+   * Ridges drain toward the sour haze along with everything else, warm back up as
+   * the valley recovers, and catch the sunset — without this last part they stay
+   * cold blue while the whole valley in front of them goes gold, and the layering
+   * stops reading as distance.
    */
-  update(heal: number, sourTint: Color, cameraX: number, cameraZ: number) {
+  update(heal: number, dusk: number, sourTint: Color, cameraX: number, cameraZ: number) {
     this.group.position.set(cameraX, 0, cameraZ)
     this.materials.forEach((material, index) => {
       const base = this.baseColors[index]
@@ -122,6 +127,8 @@ export class Horizon {
         .lerp(sourTint, 0.55)
         .multiplyScalar(0.82)
         .lerp(base, heal)
+      // Nearer ridges take more of the sunset than the ones lost in the haze.
+      material.color.lerp(DUSK_TINT, dusk * (0.62 - index * 0.13))
     })
   }
 
