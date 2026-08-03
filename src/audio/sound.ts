@@ -1,25 +1,9 @@
 import { AmbienceBed } from './ambience'
 import { MusicDirector } from './music'
+import { SFX, type SfxName } from './sfx'
+import { valleyImpulse, type Voice } from './dsp'
 
-export type SfxName =
-  | 'boing'
-  | 'splat'
-  | 'thunk'
-  | 'crack'
-  | 'pop'
-  | 'ding'
-  | 'sparkle'
-  | 'coin'
-  | 'cheer'
-  | 'uhOh'
-  | 'tick'
-  | 'tap'
-  | 'fanfare'
-  | 'regrow'
-  | 'zest'
-  | 'bleat'
-  | 'step'
-  | 'brew'
+export type { SfxName }
 
 interface Listener {
   x: number
@@ -28,23 +12,74 @@ interface Listener {
   forwardZ: number
 }
 
+export interface PlayOptions {
+  /** Extra level, 0-1 upward. Defaults to 1. */
+  gain?: number
+  /** Extra pitch multiplier on top of whatever the mix decides. */
+  pitch?: number
+  /** Combo level, for effects that walk up a scale. */
+  level?: number
+}
+
 /** Beyond this the world goes quiet; inside it, closer is louder. */
 const HEARING_RANGE = 26
+
+/**
+ * Effects big enough to push the score out of the way for a moment.
+ *
+ * Deliberately not `fanfare`: the valley waking plays a fanfare and a flourish
+ * from the score at the same instant, and ducking there would only mute half of
+ * its own celebration.
+ */
+const DUCKERS: Partial<Record<SfxName, [depth: number, hold: number]>> = {
+  crack: [0.5, 0.5],
+  cheer: [0.45, 0.7],
+}
+
+/** Impacts that feed the combo pitch ladder. */
+const LADDER_IMPACTS: Partial<Record<SfxName, true>> = { splat: true, thunk: true, crack: true }
+
+/** How long a streak of hits stays hot before the ladder resets. */
+const STREAK_WINDOW = 1.2
+
+/** D major pentatonic, matching the score, so combos never clash with it. */
+const PENTATONIC = [0, 2, 4, 7, 9]
+
+/**
+ * Where the ladder stops climbing. A combo has no upper bound, and left to run
+ * it would walk the chime straight past the top of hearing and into aliasing —
+ * so the last couple of octaves are worth having, and everything above them is
+ * not.
+ */
+const LADDER_TOP = 11
+
+function pentatonicSemitones(index: number) {
+  const step = Math.min(LADDER_TOP, Math.max(0, Math.floor(index)))
+  return PENTATONIC[step % PENTATONIC.length] + Math.floor(step / PENTATONIC.length) * 12
+}
 
 /**
  * All sound is synthesized with the Web Audio API — no audio files, no
  * dependencies. The context is created lazily on the first user gesture
  * (required on iOS) and resumed whenever the tab regains focus.
  *
- * Three buses hang off the master so the mix can be shaped as a whole: effects,
- * the adaptive score, and the ambience bed. Effects can be placed in the world —
- * `playAt` pans and attenuates them relative to the camera, so a tree cracking
- * across the meadow sounds like it's over there.
+ * The mix is built like a small studio desk. Effects run through their own bus
+ * into a glue compressor, and everything lands on a master limiter so a dozen
+ * simultaneous smashes get louder without ever clipping. Two sends hang off the
+ * side: a convolution reverb built from a synthesized impulse (the valley), and
+ * a filtered slap-back delay that only the biggest events are allowed to use.
+ *
+ * Effects can be placed in the world — `playAt` pans them, attenuates them,
+ * rolls their highs off with distance and pushes them further into the reverb,
+ * so a tree cracking across the meadow sounds like it's over there rather than
+ * like a quieter version of one at your feet.
  */
 export class SoundManager {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
   private sfxBus: GainNode | null = null
+  private reverbSend: GainNode | null = null
+  private echoSend: GainNode | null = null
   private _muted = false
   /**
    * The scene is usually asked for before the browser will let us have an audio
@@ -57,6 +92,11 @@ export class SoundManager {
   ambience: AmbienceBed | null = null
 
   private readonly listener: Listener = { x: 0, z: 0, forwardX: 0, forwardZ: -1 }
+
+  /** When each effect last fired, for thinning rapid repeats. */
+  private readonly lastFired = new Map<SfxName, number>()
+  private streak = 0
+  private lastImpact = -99
 
   get muted() {
     return this._muted
@@ -78,16 +118,10 @@ export class SoundManager {
       if (!Ctor) return
 
       this.ctx = new Ctor()
-      this.master = this.ctx.createGain()
-      this.master.gain.value = this._muted ? 0 : 0.5
-      this.master.connect(this.ctx.destination)
+      this.buildMix(this.ctx)
 
-      this.sfxBus = this.ctx.createGain()
-      this.sfxBus.gain.value = 1
-      this.sfxBus.connect(this.master)
-
-      this.music = new MusicDirector(this.ctx, this.master)
-      this.ambience = new AmbienceBed(this.ctx, this.master)
+      this.music = new MusicDirector(this.ctx, this.master!)
+      this.ambience = new AmbienceBed(this.ctx, this.master!)
       if (this.sceneWanted) this.startScene()
 
       // iOS unmutes only after a buffer actually plays inside the gesture.
@@ -100,6 +134,74 @@ export class SoundManager {
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume()
     }
+  }
+
+  private buildMix(ctx: AudioContext) {
+    // Master limiter. Nothing downstream of this can clip the output, which is
+    // what lets every effect be mixed for punch rather than for headroom.
+    const limiter = ctx.createDynamicsCompressor()
+    limiter.threshold.value = -6
+    limiter.knee.value = 6
+    limiter.ratio.value = 14
+    limiter.attack.value = 0.003
+    limiter.release.value = 0.22
+    limiter.connect(ctx.destination)
+
+    const master = ctx.createGain()
+    master.gain.value = this._muted ? 0 : 0.5
+    master.connect(limiter)
+    this.master = master
+
+    // Glue for the effects. Slow enough on the attack to let transients through
+    // — a fast compressor here would flatten the very crack we're building.
+    const glue = ctx.createDynamicsCompressor()
+    glue.threshold.value = -12
+    glue.knee.value = 12
+    glue.ratio.value = 3.5
+    glue.attack.value = 0.005
+    glue.release.value = 0.18
+    glue.connect(master)
+
+    const sfxBus = ctx.createGain()
+    sfxBus.gain.value = 0.9
+    sfxBus.connect(glue)
+    this.sfxBus = sfxBus
+
+    const convolver = ctx.createConvolver()
+    convolver.buffer = valleyImpulse(ctx)
+    const reverbReturn = ctx.createGain()
+    reverbReturn.gain.value = 0.85
+    convolver.connect(reverbReturn)
+    reverbReturn.connect(master)
+
+    const reverbSend = ctx.createGain()
+    reverbSend.gain.value = 1
+    reverbSend.connect(convolver)
+    this.reverbSend = reverbSend
+
+    // Slap-back off the far side of the valley: dark, and it decays away fast.
+    const delay = ctx.createDelay(1)
+    delay.delayTime.value = 0.27
+    const damping = ctx.createBiquadFilter()
+    damping.type = 'lowpass'
+    damping.frequency.value = 1300
+    const feedback = ctx.createGain()
+    feedback.gain.value = 0.3
+    delay.connect(damping)
+    damping.connect(feedback)
+    feedback.connect(delay)
+
+    const echoReturn = ctx.createGain()
+    echoReturn.gain.value = 0.5
+    damping.connect(echoReturn)
+    echoReturn.connect(master)
+    // The repeats also wash into the reverb, which blurs them into the distance.
+    echoReturn.connect(reverbSend)
+
+    const echoSend = ctx.createGain()
+    echoSend.gain.value = 1
+    echoSend.connect(delay)
+    this.echoSend = echoSend
   }
 
   resume() {
@@ -141,12 +243,14 @@ export class SoundManager {
     this.ambience?.update(recovery, wind)
   }
 
-  play(name: SfxName) {
-    this.emit(name, this.sfxBus)
+  play(name: SfxName, options?: PlayOptions) {
+    const ctx = this.ctx
+    if (!ctx || !this.sfxBus || this._muted || ctx.state !== 'running') return
+    this.emit(name, this.sfxBus, 1, options)
   }
 
   /** Play an effect positioned in the world, panned and attenuated. */
-  playAt(name: SfxName, x: number, z: number) {
+  playAt(name: SfxName, x: number, z: number, options?: PlayOptions) {
     const ctx = this.ctx
     const bus = this.sfxBus
     if (!ctx || !bus || this._muted || ctx.state !== 'running') return
@@ -166,282 +270,85 @@ export class SoundManager {
 
     const gain = ctx.createGain()
     gain.gain.value = attenuation
+
+    // Air swallows the highs long before it swallows the lows. Rolling them off
+    // with distance is most of what makes a far-off crack read as far off.
+    const air = ctx.createBiquadFilter()
+    air.type = 'lowpass'
+    air.frequency.value = Math.max(1400, 19000 * Math.pow(0.5, distance / 7))
+    air.Q.value = 0.5
+
     const panner = ctx.createStereoPanner()
     panner.pan.value = pan
-    gain.connect(panner)
+
+    gain.connect(air)
+    air.connect(panner)
     panner.connect(bus)
 
-    this.emit(name, gain)
+    // The further away it is, the more of it you hear as reflection rather than
+    // as the thing itself — the other half of the distance cue.
+    this.emit(name, gain, Math.min(3.2, 1 + distance * 0.09), options)
   }
 
-  private emit(name: SfxName, destination: AudioNode | null) {
+  /**
+   * Build a voice for one event and hand it to the instrument.
+   *
+   * `space` scales the send levels the instrument asks for; everything else here
+   * is about keeping a burst of simultaneous events from turning to mud.
+   */
+  private emit(name: SfxName, dry: AudioNode, space: number, options?: PlayOptions) {
     const ctx = this.ctx
-    if (!ctx || !destination || this._muted || ctx.state !== 'running') return
+    const build = SFX[name]
+    if (!ctx || !this.reverbSend || !this.echoSend || !build) return
+
     const now = ctx.currentTime
-    const out = destination
+    let gain = options?.gain ?? 1
+    let start = now
+    let pitch = options?.pitch ?? 1
 
-    switch (name) {
-      case 'boing':
-        this.tone({ type: 'triangle', from: 300, to: 90, start: now, length: 0.16, peak: 0.22, out })
-        break
-      case 'splat':
-        this.noise({ start: now, length: 0.12, filterHz: 900, peak: 0.3, out })
-        this.tone({ type: 'sine', from: 130, to: 60, start: now, length: 0.12, peak: 0.25, out })
-        break
-      case 'thunk':
-        this.noise({ start: now, length: 0.09, filterHz: 420, peak: 0.3, out })
-        this.tone({ type: 'sine', from: 85, to: 55, start: now, length: 0.14, peak: 0.3, out })
-        break
-      case 'crack':
-        this.noise({ start: now, length: 0.2, filterHz: 700, peak: 0.34, out })
-        this.tone({ type: 'triangle', from: 340, to: 240, start: now, length: 0.12, peak: 0.2, out })
-        this.tone({
-          type: 'triangle',
-          from: 240,
-          to: 150,
-          start: now + 0.12,
-          length: 0.14,
-          peak: 0.2,
-          out,
-        })
-        this.tone({
-          type: 'triangle',
-          from: 150,
-          to: 80,
-          start: now + 0.26,
-          length: 0.2,
-          peak: 0.2,
-          out,
-        })
-        break
-      case 'pop':
-        this.tone({ type: 'sine', from: 500, to: 900, start: now, length: 0.07, peak: 0.2, out })
-        break
-      case 'ding':
-        this.tone({ type: 'sine', from: 1319, to: 1319, start: now, length: 0.28, peak: 0.16, out })
-        this.tone({
-          type: 'sine',
-          from: 1976,
-          to: 1976,
-          start: now + 0.02,
-          length: 0.3,
-          peak: 0.1,
-          out,
-        })
-        break
-      case 'sparkle':
-        [1319, 1568, 2093].forEach((freq, index) => {
-          this.tone({
-            type: 'sine',
-            from: freq,
-            to: freq,
-            start: now + index * 0.07,
-            length: 0.22,
-            peak: 0.13,
-            out,
-          })
-        })
-        break
-      case 'coin':
-        this.tone({ type: 'square', from: 988, to: 988, start: now, length: 0.08, peak: 0.11, out })
-        this.tone({
-          type: 'square',
-          from: 1319,
-          to: 1319,
-          start: now + 0.08,
-          length: 0.16,
-          peak: 0.11,
-          out,
-        })
-        break
-      case 'cheer':
-        this.noise({ start: now, length: 0.55, filterHz: 1800, peak: 0.1, out })
-        ;[523, 659, 784, 1047].forEach((freq, index) => {
-          this.tone({
-            type: 'triangle',
-            from: freq,
-            to: freq,
-            start: now + index * 0.09,
-            length: 0.24,
-            peak: 0.15,
-            out,
-          })
-        })
-        break
-      case 'uhOh':
-        this.tone({ type: 'sine', from: 392, to: 392, start: now, length: 0.18, peak: 0.14, out })
-        this.tone({
-          type: 'sine',
-          from: 330,
-          to: 330,
-          start: now + 0.2,
-          length: 0.26,
-          peak: 0.14,
-          out,
-        })
-        break
-      case 'tick':
-        this.tone({ type: 'square', from: 880, to: 880, start: now, length: 0.05, peak: 0.09, out })
-        break
-      case 'tap':
-        this.tone({ type: 'sine', from: 620, to: 660, start: now, length: 0.06, peak: 0.12, out })
-        break
-      case 'fanfare':
-        [523, 659, 784, 659, 1047].forEach((freq, index) => {
-          this.tone({
-            type: 'triangle',
-            from: freq,
-            to: freq,
-            start: now + index * 0.13,
-            length: index === 4 ? 0.5 : 0.16,
-            peak: 0.16,
-            out,
-          })
-        })
-        break
-      case 'regrow':
-        this.tone({ type: 'sine', from: 320, to: 720, start: now, length: 0.24, peak: 0.13, out })
-        break
-
-      case 'zest':
-        // Colour rushing back out: a bright rising sweep with a shimmer on top.
-        this.tone({ type: 'sine', from: 420, to: 1650, start: now, length: 0.3, peak: 0.14, out })
-        this.tone({
-          type: 'triangle',
-          from: 840,
-          to: 2400,
-          start: now + 0.02,
-          length: 0.26,
-          peak: 0.07,
-          out,
-        })
-        this.noise({ start: now, length: 0.22, filterHz: 5200, peak: 0.05, out })
-        break
-
-      case 'bleat': {
-        // A little formant trick: a buzzy source through two bandpass filters
-        // sitting where a small animal's vowel formants would be.
-        const ctxRef = this.ctx
-        if (!ctxRef) break
-        const osc = ctxRef.createOscillator()
-        const gain = ctxRef.createGain()
-        const vibrato = ctxRef.createOscillator()
-        const vibratoGain = ctxRef.createGain()
-
-        osc.type = 'sawtooth'
-        osc.frequency.setValueAtTime(430 + Math.random() * 90, now)
-        osc.frequency.exponentialRampToValueAtTime(330, now + 0.3)
-
-        // The wobble is what makes it read as a bleat rather than a beep.
-        vibrato.frequency.value = 22
-        vibratoGain.gain.value = 38
-        vibrato.connect(vibratoGain)
-        vibratoGain.connect(osc.frequency)
-
-        const formantA = ctxRef.createBiquadFilter()
-        formantA.type = 'bandpass'
-        formantA.frequency.value = 780
-        formantA.Q.value = 5
-        const formantB = ctxRef.createBiquadFilter()
-        formantB.type = 'bandpass'
-        formantB.frequency.value = 1420
-        formantB.Q.value = 7
-
-        gain.gain.setValueAtTime(0.0001, now)
-        gain.gain.exponentialRampToValueAtTime(0.2, now + 0.03)
-        gain.gain.setValueAtTime(0.2, now + 0.2)
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34)
-
-        osc.connect(formantA)
-        osc.connect(formantB)
-        formantA.connect(gain)
-        formantB.connect(gain)
-        gain.connect(out)
-
-        osc.start(now)
-        vibrato.start(now)
-        osc.stop(now + 0.4)
-        vibrato.stop(now + 0.4)
-        break
-      }
-
-      case 'step':
-        // Barely there — a scuff of grass, not a boot on gravel.
-        this.noise({ start: now, length: 0.05, filterHz: 1600, peak: 0.035, out })
-        break
-
-      case 'brew':
-        for (let index = 0; index < 3; index += 1) {
-          this.tone({
-            type: 'sine',
-            from: 180 + index * 40,
-            to: 320 + index * 60,
-            start: now + index * 0.05,
-            length: 0.09,
-            peak: 0.08,
-            out,
-          })
-        }
-        break
+    // Repeat thinning. Five lemons bursting on one swing should sound like a
+    // handful of fruit, not like the same sample played five times — so stacked
+    // repeats come in quieter and a few milliseconds apart, which also keeps
+    // their transients from lining up into one harsh spike.
+    const previous = this.lastFired.get(name)
+    if (previous !== undefined && now - previous < 0.06) {
+      gain *= now - previous < 0.02 ? 0.45 : 0.62
+      start += Math.random() * 0.012
     }
-  }
+    this.lastFired.set(name, now)
 
-  private tone(options: {
-    type: OscillatorType
-    from: number
-    to: number
-    start: number
-    length: number
-    peak: number
-    out: AudioNode
-  }) {
-    const ctx = this.ctx
-    if (!ctx) return
-    const oscillator = ctx.createOscillator()
-    const gain = ctx.createGain()
-    oscillator.type = options.type
-    oscillator.frequency.setValueAtTime(options.from, options.start)
-    if (options.to !== options.from) {
-      oscillator.frequency.exponentialRampToValueAtTime(
-        Math.max(1, options.to),
-        options.start + options.length,
-      )
+    // The combo ladder: keep landing hits and the impacts climb a scale.
+    if (LADDER_IMPACTS[name]) {
+      this.streak = now - this.lastImpact < STREAK_WINDOW ? Math.min(this.streak + 1, 12) : 0
+      this.lastImpact = now
+      pitch *= Math.pow(2, Math.min(this.streak, 10) * 0.42 / 12)
     }
-    gain.gain.setValueAtTime(0, options.start)
-    gain.gain.linearRampToValueAtTime(options.peak, options.start + 0.012)
-    gain.gain.exponentialRampToValueAtTime(0.001, options.start + options.length)
-    oscillator.connect(gain)
-    gain.connect(options.out)
-    oscillator.start(options.start)
-    oscillator.stop(options.start + options.length + 0.05)
-  }
 
-  private noise(options: {
-    start: number
-    length: number
-    filterHz: number
-    peak: number
-    out: AudioNode
-  }) {
-    const ctx = this.ctx
-    if (!ctx) return
-    const frames = Math.max(1, Math.floor(ctx.sampleRate * options.length))
-    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate)
-    const data = buffer.getChannelData(0)
-    for (let index = 0; index < frames; index += 1) {
-      data[index] = Math.random() * 2 - 1
+    if (options?.level !== undefined) {
+      pitch *= Math.pow(2, pentatonicSemitones(options.level - 1) / 12)
     }
-    const source = ctx.createBufferSource()
-    source.buffer = buffer
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'lowpass'
-    filter.frequency.value = options.filterHz
-    const gain = ctx.createGain()
-    gain.gain.setValueAtTime(options.peak, options.start)
-    gain.gain.exponentialRampToValueAtTime(0.001, options.start + options.length)
-    source.connect(filter)
-    filter.connect(gain)
-    gain.connect(options.out)
-    source.start(options.start)
+
+    const reverbTap = ctx.createGain()
+    reverbTap.gain.value = space
+    reverbTap.connect(this.reverbSend)
+
+    const echoTap = ctx.createGain()
+    echoTap.gain.value = space
+    echoTap.connect(this.echoSend)
+
+    const voice: Voice = {
+      ctx,
+      out: dry,
+      reverb: reverbTap,
+      echo: echoTap,
+      now: start,
+      rand: Math.random(),
+      gain,
+      pitch,
+    }
+    build(voice)
+
+    const duck = DUCKERS[name]
+    if (duck) this.music?.duck(duck[0], duck[1])
   }
 }

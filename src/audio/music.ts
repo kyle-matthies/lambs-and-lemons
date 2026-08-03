@@ -16,6 +16,9 @@
 
 const LOOKAHEAD = 0.35
 
+/** Resting level of the whole score, and where a duck returns it to. */
+const BUS_LEVEL = 0.34
+
 /** D major pentatonic — no semitone clashes, so any two layers agree. */
 const SCALE = [0, 2, 4, 7, 9]
 const ROOT = 146.83 // D3
@@ -80,7 +83,7 @@ export class MusicDirector {
   constructor(ctx: AudioContext, destination: AudioNode) {
     this.ctx = ctx
     this.bus = ctx.createGain()
-    this.bus.gain.value = 0.34
+    this.bus.gain.value = BUS_LEVEL
     this.bus.connect(destination)
 
     const makeLayer = (from: number, to: number, ceiling: number): Layer => {
@@ -288,6 +291,29 @@ export class MusicDirector {
     gain.connect(options.target)
     osc.start(options.time)
     osc.stop(options.time + options.length + 0.05)
+  }
+
+  /**
+   * Step out of the way for a moment.
+   *
+   * A tree coming down lands far harder if the score gets quieter underneath it
+   * than if the two fight for the same space — the impact reads as loud because
+   * everything else got small, which is cheaper and more convincing than simply
+   * turning the effect up.
+   *
+   * @param depth 0-1 fraction of the score's level to give up.
+   * @param hold  seconds to take getting all the way back.
+   */
+  duck(depth: number, hold: number) {
+    if (this.ctx.state !== 'running') return
+    const now = this.ctx.currentTime
+    const gain = this.bus.gain
+    const floor = BUS_LEVEL * (1 - Math.min(0.9, Math.max(0, depth)))
+    gain.cancelScheduledValues(now)
+    gain.setValueAtTime(gain.value, now)
+    gain.linearRampToValueAtTime(floor, now + 0.03)
+    gain.setValueAtTime(floor, now + hold * 0.35)
+    gain.linearRampToValueAtTime(BUS_LEVEL, now + hold)
   }
 
   /** One-shot flourish for the moment the valley wakes. */

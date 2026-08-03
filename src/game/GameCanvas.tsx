@@ -12,6 +12,7 @@ import {
   updateGame,
 } from './engine'
 import { useKeyboardInput } from './input'
+import { TREE_HEALTH } from './constants'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
 import { GameHud, StartOverlay, EndOverlay } from './ArcadeOverlays'
 import { ValleyRenderer } from '../render/Renderer'
@@ -67,12 +68,11 @@ const emptySnapshot: GameSnapshot = {
 /** World events that get panned and attenuated relative to the camera. */
 const SPATIAL_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>> = {
   smash: 'splat',
-  whiff: 'boing',
-  treeHit: 'thunk',
+  whiff: 'whoosh',
   treeBreak: 'crack',
   treeRegrow: 'regrow',
-  pickupLemon: 'pop',
-  pickupLeaf: 'pop',
+  pickupLemon: 'pickLemon',
+  pickupLeaf: 'pickLeaf',
   cupBrewed: 'brew',
   footstep: 'step',
 }
@@ -84,6 +84,11 @@ const FLAT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['pl
 
 /** Below this a zest burst is background colour, not an event worth hearing. */
 const ZEST_SOUND_RADIUS = 6
+
+/** How far through a tree is, 0 at full health and approaching 1 as it gives. */
+function strain(health: number) {
+  return 1 - Math.max(0, Math.min(TREE_HEALTH, health)) / TREE_HEALTH
+}
 
 /**
  * Haptics for the moments worth feeling. Android fires these; iOS Safari ignores
@@ -260,6 +265,19 @@ export function GameCanvas({
                 break
               case 'smash':
                 buzz(12)
+                break
+              case 'treeHit':
+                // A trunk that's nearly through rings tighter and louder, so
+                // you can hear the next swing is the one that fells it.
+                sound.playAt('thunk', event.x, event.z, {
+                  pitch: 1 + strain(event.health) * 0.18,
+                  gain: 1 + strain(event.health) * 0.2,
+                })
+                break
+              case 'combo':
+                // The ping walks up a scale with the streak, so a long run of
+                // hits plays a rising phrase instead of the same chime.
+                sound.playAt('combo', event.x, event.z, { level: event.level })
                 break
               case 'treeBreak':
                 buzz([18, 40, 26])
