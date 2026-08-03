@@ -25,6 +25,7 @@ import {
   TREE_WOBBLE_TIME,
 } from '../game/constants'
 import type { GameEvent, GameState } from '../game/types'
+import type { DecorationId } from '../lib/storage'
 import { BLOOM_AREA, BLOOM_ORIGIN } from '../game/bloom'
 import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
@@ -45,7 +46,7 @@ import { Horizon } from './horizon'
 import { Lamb } from './lamb'
 import { PALETTE, SOUR_TINT } from './palette'
 import { PostPipeline } from './postfx'
-import { ItemField, createBlobShadow, createStand } from './props'
+import { ItemField, createBlobShadow, createDecorations, createStand, setDecorations } from './props'
 import {
   detectQualityTier,
   prefersReducedMotion,
@@ -87,6 +88,8 @@ const OCCLUSION_RADIUS = 2.4
 
 export interface ValleyRendererOptions {
   tier?: QualityTier
+  /** Stand decorations bought in the tycoon shop. */
+  decorations?: DecorationId[]
   /** Container for the DOM-rendered score popups. Omit to disable them. */
   floaterLayer?: HTMLElement | null
   /** Skip the adaptive downgrade watchdog (used by tests for determinism). */
@@ -144,6 +147,8 @@ export class ValleyRenderer {
   private readonly healOverride: number | null
   private readonly bloomFlooded: boolean
   private calmMotion = false
+  private decorations: Group | null = null
+  private readonly ownedDecorations: DecorationId[]
   private disposed = false
 
   private readonly tmp = new Vector3()
@@ -156,6 +161,7 @@ export class ValleyRenderer {
     this.floaters = options.floaterLayer ? new Floaters(options.floaterLayer) : null
     this.healOverride = options.healOverride ?? null
     this.bloomFlooded = options.bloomFlooded ?? false
+    this.ownedDecorations = options.decorations ?? []
     this.settings = settingsFor(options.tier ?? detectQualityTier())
 
     this.renderer = new WebGLRenderer({
@@ -317,6 +323,9 @@ export class ValleyRenderer {
     const stand = createStand(this.uniforms, this.detailTexture)
     stand.position.set(state.stand.x, state.stand.y, state.stand.z)
     stand.rotation.y = state.stand.rotation
+    this.decorations = createDecorations(this.uniforms, this.detailTexture)
+    setDecorations(this.decorations, this.ownedDecorations)
+    stand.add(this.decorations)
     this.worldGroup.add(stand)
 
     this.worldGroup.add(this.lemonField.mesh)
@@ -684,7 +693,7 @@ export class ValleyRenderer {
     this.uniforms.uWindStrength.value = 0.75 + Math.sin(this.time * 0.23) * 0.35
 
     // --- characters and props -------------------------------------------------
-    this.lamb.update(state, dt, this.time)
+    this.lamb.update(state.player, dt, this.time)
     this.lambShadow.position.set(state.player.x, state.player.y + 0.04, state.player.z)
     const shadowScale = 1 + clamp01(state.player.speed / PLAYER_SPEED) * 0.18
     this.lambShadow.scale.setScalar(shadowScale)

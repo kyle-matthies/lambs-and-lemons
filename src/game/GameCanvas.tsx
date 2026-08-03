@@ -94,11 +94,13 @@ export function GameCanvas({
   muted,
   onToggleMute,
   onExit,
+  decorations,
 }: {
   sound: SoundManager
   muted: boolean
   onToggleMute: () => void
   onExit: () => void
+  /** Trinkets bought in the stand's shop — they dress the arcade stand too. */
   decorations?: DecorationId[]
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
@@ -114,7 +116,9 @@ export function GameCanvas({
   const soundRef = useRef(sound)
   const roundMinutesRef = useRef<RoundMinutes>(2)
   const listenerRef = useRef({ x: 0, z: 0, forwardX: 0, forwardZ: -1 })
+  const decorationsRef = useRef(decorations ?? [])
   soundRef.current = sound
+  decorationsRef.current = decorations ?? []
 
   const [ready, setReady] = useState(false)
   const [roundMinutes, setRoundMinutes] = useState<RoundMinutes>(2)
@@ -158,6 +162,7 @@ export function GameCanvas({
         rendererRef.current = new ValleyRenderer(canvas, game, {
           healOverride: healParam === null ? undefined : Number(healParam),
           floaterLayer: floaterLayerRef.current,
+          decorations: decorationsRef.current,
         })
       } catch (error) {
         console.error('Unable to start the 3D renderer', error)

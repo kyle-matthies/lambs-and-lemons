@@ -14,7 +14,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { angleDelta, clamp, clamp01, damp, lerp, smoothstep } from '../core/math'
 import { mulberry32, randRange, type Rng } from '../core/rng'
 import { PLAYER_SPEED, SWING_TIME } from '../game/constants'
-import type { GameState } from '../game/types'
+import type { Player } from '../game/types'
 import { paint } from './geometryUtils'
 import { PALETTE } from './palette'
 import { applyValleyShading, type ValleyUniforms } from './valleyShading'
@@ -316,8 +316,11 @@ export class Lamb {
     return target
   }
 
-  update(state: GameState, dt: number, time: number) {
-    const player = state.player
+  /**
+   * Pose Lammy from a player state. Takes the `Player` rather than the whole
+   * `GameState` so the stand scene can puppet her with a hand-made one.
+   */
+  update(player: Player, dt: number, time: number) {
     const speed01 = clamp01(player.speed / PLAYER_SPEED)
 
     this.group.position.set(player.x, player.y, player.z)

@@ -1,6 +1,7 @@
 import {
   AdditiveBlending,
   BoxGeometry,
+  BufferAttribute,
   BufferGeometry,
   Color,
   ConeGeometry,
@@ -24,6 +25,7 @@ import { clamp01 } from '../core/math'
 import { mulberry32, type Rng } from '../core/rng'
 import { paint } from './geometryUtils'
 import type { GroundItem } from '../game/types'
+import type { DecorationId } from '../lib/storage'
 import { PALETTE } from './palette'
 import { applyValleyShading, type ValleyUniforms } from './valleyShading'
 
@@ -114,14 +116,27 @@ export function buildStandGeometry(seed = 1): BufferGeometry {
     parts.push(paint(scallop, index % 2 === 0 ? PALETTE.standCloth : PALETTE.standClothAlt, 0.4))
   }
 
-  // A big friendly lemon on the sign board.
-  const board = new BoxGeometry(0.78, 0.44, 0.06)
-  board.translate(0, counterHeight + postHeight + 0.62, -depth / 2 + 0.16)
+  // A big friendly lemon on a sign board, propped on the awning ridge with two
+  // little struts so it doesn't read as floating.
+  const signY = counterHeight + postHeight + 0.44
+  const signZ = -depth / 2 + 0.18
+  for (const x of [-0.26, 0.26]) {
+    const strut = new CylinderGeometry(0.02, 0.02, 0.3, 5, 1)
+    strut.translate(x, signY - 0.24, signZ + 0.03)
+    parts.push(paint(strut, PALETTE.standWoodDark))
+  }
+
+  const board = new BoxGeometry(0.82, 0.42, 0.06)
+  board.translate(0, signY, signZ)
   parts.push(paint(board, PALETTE.standClothAlt))
 
-  const signLemon = new SphereGeometry(0.15, 10, 8)
+  const boardEdge = new BoxGeometry(0.88, 0.48, 0.03)
+  boardEdge.translate(0, signY, signZ - 0.02)
+  parts.push(paint(boardEdge, PALETTE.standWoodDark))
+
+  const signLemon = new SphereGeometry(0.14, 10, 8)
   signLemon.scale(0.9, 1.15, 0.5)
-  signLemon.translate(0, counterHeight + postHeight + 0.62, -depth / 2 + 0.1)
+  signLemon.translate(0, signY, signZ + 0.05)
   parts.push(paint(signLemon, PALETTE.lemon))
 
   // Jug of lemonade and a stack of cups on the counter.
@@ -308,6 +323,183 @@ export function createGlowSprite(alphaMap: Texture, color: Color, size = 1) {
   const mesh = new Mesh(new PlaneGeometry(size, size), material)
   mesh.renderOrder = 5
   return mesh
+}
+
+// ---------------------------------------------------------------------------
+// Stand decorations
+// ---------------------------------------------------------------------------
+
+/**
+ * The trinkets bought in the shop, built in the stand's local space so they can
+ * simply be parented to it. Each is a named child that gets toggled on or off —
+ * cheap, and it keeps the "spend your coins, see it in both modes" loop intact
+ * now that the stand is 3D everywhere.
+ */
+function buildDecoration(id: DecorationId): BufferGeometry {
+  const parts: BufferGeometry[] = []
+  const counterHeight = 1.02
+  const width = 1.9
+  const depth = 0.85
+  const postHeight = 1.05
+
+  if (id === 'flowers') {
+    const pot = new CylinderGeometry(0.11, 0.085, 0.16, 9, 1)
+    pot.translate(-width / 2 + 0.2, counterHeight + 0.2, 0.04)
+    parts.push(paint(pot, new Color('#b8622f')))
+
+    const blooms = [PALETTE.flowerPink, PALETTE.flowerOrange, PALETTE.flowerWhite]
+    blooms.forEach((color, index) => {
+      const stem = new CylinderGeometry(0.012, 0.012, 0.2, 4, 1)
+      stem.translate(-width / 2 + 0.2 + (index - 1) * 0.07, counterHeight + 0.36, 0.04)
+      parts.push(paint(stem, PALETTE.leafDeep))
+
+      const bloom = new SphereGeometry(0.06, 8, 6)
+      bloom.scale(1, 0.7, 1)
+      bloom.translate(-width / 2 + 0.2 + (index - 1) * 0.07, counterHeight + 0.47, 0.04)
+      parts.push(paint(bloom, color))
+    })
+  }
+
+  if (id === 'bunting') {
+    const colors = [
+      PALETTE.standCloth,
+      PALETTE.lemon,
+      new Color('#5fc7ff'),
+      PALETTE.leafLight,
+      PALETTE.flowerPink,
+    ]
+    const span = width + 0.2
+    for (let index = 0; index < 9; index += 1) {
+      const t = index / 8
+      const x = -span / 2 + t * span
+      // Hang along a shallow catenary between the awning posts.
+      const sag = Math.sin(Math.PI * t) * 0.09
+      const flag = new ConeGeometry(0.055, 0.14, 3, 1)
+      flag.rotateX(Math.PI)
+      flag.translate(x, counterHeight + postHeight + 0.02 - sag, depth / 2 + 0.24)
+      parts.push(paint(flag, colors[index % colors.length], 0.5))
+    }
+  }
+
+  if (id === 'umbrella') {
+    const poleX = width / 2 + 0.62
+    const poleZ = 0.1
+    const pole = new CylinderGeometry(0.035, 0.045, 2.2, 7, 1)
+    pole.translate(poleX, 1.1, poleZ)
+    parts.push(paint(pole, PALETTE.standWoodDark))
+
+    // Canopy built as individual wedges so the stripes actually alternate — a
+    // single cone can only take one colour through `paint`.
+    const segments = 10
+    const radius = 0.78
+    const apex = 2.28
+    const rim = 2.02
+    for (let index = 0; index < segments; index += 1) {
+      const a0 = (index / segments) * Math.PI * 2
+      const a1 = ((index + 1) / segments) * Math.PI * 2
+      const positions = new Float32Array([
+        poleX,
+        apex,
+        poleZ,
+        poleX + Math.cos(a0) * radius,
+        rim,
+        poleZ + Math.sin(a0) * radius,
+        poleX + Math.cos(a1) * radius,
+        rim,
+        poleZ + Math.sin(a1) * radius,
+      ])
+      const wedge = new BufferGeometry()
+      wedge.setAttribute('position', new BufferAttribute(positions, 3))
+      // Indexed to match every other primitive here — `mergeGeometries` refuses
+      // to mix indexed and non-indexed inputs.
+      wedge.setIndex([0, 1, 2])
+      wedge.computeVertexNormals()
+      parts.push(
+        paint(wedge, index % 2 === 0 ? PALETTE.standCloth : PALETTE.standClothAlt, 0.12),
+      )
+    }
+
+    // A scalloped fringe hanging off the rim.
+    for (let index = 0; index < segments; index += 1) {
+      const angle = ((index + 0.5) / segments) * Math.PI * 2
+      const scallop = new SphereGeometry(0.075, 7, 5, 0, Math.PI * 2, 0, Math.PI / 2)
+      scallop.rotateX(Math.PI)
+      scallop.scale(1, 0.9, 1)
+      scallop.translate(
+        poleX + Math.cos(angle) * (radius - 0.03),
+        rim - 0.01,
+        poleZ + Math.sin(angle) * (radius - 0.03),
+      )
+      parts.push(paint(scallop, index % 2 === 0 ? PALETTE.standClothAlt : PALETTE.standCloth, 0.2))
+    }
+  }
+
+  if (id === 'sign') {
+    // A little sandwich board out front, angled to face whoever walks up.
+    const signX = -width / 2 - 0.62
+    const signZ = depth / 2 + 0.42
+    for (const lean of [1, -1]) {
+      const board = new BoxGeometry(0.6, 0.68, 0.035)
+      board.rotateX(lean * 0.2)
+      board.translate(signX, 0.36, signZ + lean * 0.11)
+      parts.push(paint(board, lean > 0 ? PALETTE.standClothAlt : PALETTE.standWood))
+    }
+
+    // A fat lemon and two "price" bars on the face the customer sees.
+    const lemon = new SphereGeometry(0.15, 10, 8)
+    lemon.scale(0.92, 1.15, 0.35)
+    lemon.rotateX(0.2)
+    lemon.translate(signX, 0.5, signZ + 0.14)
+    parts.push(paint(lemon, PALETTE.lemon))
+
+    for (let index = 0; index < 2; index += 1) {
+      const bar = new BoxGeometry(0.3 - index * 0.09, 0.05, 0.02)
+      bar.rotateX(0.2)
+      bar.translate(signX, 0.24 - index * 0.09, signZ + 0.16)
+      parts.push(paint(bar, PALETTE.standWoodDark))
+    }
+  }
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
+export const DECORATION_IDS: DecorationId[] = ['flowers', 'bunting', 'umbrella', 'sign']
+
+/** A group of every decoration, each hidden until it's been bought. */
+export function createDecorations(uniforms: ValleyUniforms, detail: Texture) {
+  const material = new MeshStandardMaterial({
+    vertexColors: true,
+    map: detail,
+    roughness: 0.8,
+    metalness: 0,
+  })
+  applyValleyShading(material, uniforms, {
+    wind: 0.06,
+    swayAttribute: true,
+    bloom: true,
+    bloomFloor: 0.2,
+    rim: 1,
+  })
+
+  const group = new Group()
+  group.name = 'decorations'
+  for (const id of DECORATION_IDS) {
+    const mesh = new Mesh(buildDecoration(id), material)
+    mesh.name = id
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.visible = false
+    group.add(mesh)
+  }
+  return group
+}
+
+export function setDecorations(group: Group, owned: DecorationId[]) {
+  for (const child of group.children) {
+    child.visible = owned.includes(child.name as DecorationId)
+  }
 }
 
 export function createPropGroup(name: string) {

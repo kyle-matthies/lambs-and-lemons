@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test'
 
+// Both specs drive a 3D scene through a software rasteriser, which runs the
+// simulation well below real time. Generous budgets, not flaky waits.
+test.describe.configure({ timeout: 120_000 })
+
 test('tycoon: serve a full day-1 customer and earn coins', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
@@ -8,8 +12,10 @@ test('tycoon: serve a full day-1 customer and earn coins', async ({ page }) => {
   await page.getByRole('button', { name: /My Stand/i }).tap()
 
   // Wait for the customer to arrive and order.
+  // The stand is a 3D scene now; headless Chromium software-rasterises it, so
+  // both the build and the customer's walk-in run well below real time.
   const serve = page.getByRole('button', { name: /Serve!/i })
-  await expect(serve).toBeVisible({ timeout: 10_000 })
+  await expect(serve).toBeVisible({ timeout: 40_000 })
 
   // Serve every cup the customer asked for (day 1 can be 1 cup).
   while (await serve.isVisible()) {
@@ -26,7 +32,7 @@ test('tycoon: serve a full day-1 customer and earn coins', async ({ page }) => {
   }
 
   // Exact payment goes straight to the happy phase and pays price + tip.
-  await expect(page.locator('.tycoon-caption.big')).toBeVisible({ timeout: 5_000 })
+  await expect(page.locator('.tycoon-caption.big')).toBeVisible({ timeout: 20_000 })
   const purseText = await page.locator('.tycoon-purse').innerText()
   const purse = Number(purseText.replace(/\D/g, ''))
   expect(purse).toBeGreaterThanOrEqual(4) // 1 cup: price 3 + tip 1
@@ -37,8 +43,10 @@ test('tycoon: purse persists back to the menu', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: /My Stand/i }).tap()
 
+  // The stand is a 3D scene now; headless Chromium software-rasterises it, so
+  // both the build and the customer's walk-in run well below real time.
   const serve = page.getByRole('button', { name: /Serve!/i })
-  await expect(serve).toBeVisible({ timeout: 10_000 })
+  await expect(serve).toBeVisible({ timeout: 40_000 })
   while (await serve.isVisible()) {
     await serve.tap()
     await page.waitForTimeout(250)
@@ -48,7 +56,7 @@ test('tycoon: purse persists back to the menu', async ({ page }) => {
     await coins.first().tap()
     await page.waitForTimeout(200)
   }
-  await expect(page.locator('.tycoon-caption.big')).toBeVisible({ timeout: 5_000 })
+  await expect(page.locator('.tycoon-caption.big')).toBeVisible({ timeout: 20_000 })
 
   await page.getByRole('button', { name: 'Home' }).tap()
   const strip = await page.locator('.menu-strip').innerText()
