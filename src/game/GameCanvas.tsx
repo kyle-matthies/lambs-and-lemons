@@ -34,6 +34,10 @@ const EMPTY_INPUT: GameInput = { active: false, x: 0, y: 0 }
 
 const emptySnapshot: GameSnapshot = {
   phase: 'ready',
+  mode: 'arcade',
+  chapterId: null,
+  objectives: [],
+  objectiveFraction: 0,
   roundMinutes: 2,
   timeLeft: 120,
   score: 0,
@@ -59,6 +63,7 @@ const emptySnapshot: GameSnapshot = {
     lemonsCollected: 0,
     leavesCollected: 0,
     cupsSold: 0,
+    cupsBrewed: 0,
     sparkleCups: 0,
     crittersFreed: 0,
   },

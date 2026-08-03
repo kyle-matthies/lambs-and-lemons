@@ -183,9 +183,11 @@ export function createGrass(world: World, options: GrassOptions, uniforms: Valle
     if (normal.y < 0.72) continue
 
     const y = world.heightAt(x, z)
-    // Nothing grows in the pond.
-    const pondDistance = Math.hypot(x - world.pond.x, z - world.pond.z)
-    if (pondDistance < world.pond.radius * 0.95 && y < world.waterLevel + 0.25) continue
+    // Nothing grows in the pond — where there is one.
+    if (world.pond) {
+      const pondDistance = Math.hypot(x - world.pond.x, z - world.pond.z)
+      if (pondDistance < world.pond.radius * 0.95 && y < world.waterLevel + 0.25) continue
+    }
 
     position.set(x, y - 0.03, z)
     quaternion.setFromAxisAngle(up, rng() * Math.PI * 2)

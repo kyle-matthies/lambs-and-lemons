@@ -346,9 +346,12 @@ export class ValleyRenderer {
       )
     }
 
-    this.water = new Water(world)
-    this.water.setSunDirection(SUN_DIRECTION)
-    this.worldGroup.add(this.water.mesh)
+    // Chapters on dry ground never build a water plane at all.
+    if (world.pond) {
+      this.water = new Water(world, world.pond)
+      this.water.setSunDirection(SUN_DIRECTION)
+      this.worldGroup.add(this.water.mesh)
+    }
 
     this.worldGroup.add(createRocks(world, layout.rocks, this.uniforms))
     this.worldGroup.add(createBushes(world, layout.bushes, this.uniforms, this.detailTexture))
