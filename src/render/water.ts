@@ -73,35 +73,56 @@ float vnoise( vec2 p ) {
   return mix( mix( a, b, f.x ), mix( c, d, f.x ), f.y );
 }
 
+/** Ripple height field. Sampled three times to build a normal by difference. */
+float ripples( vec2 p, float t ) {
+  return
+    sin( p.x * 2.3 + t * 1.35 ) * 0.5 +
+    sin( p.y * 2.9 - t * 1.05 ) * 0.4 +
+    vnoise( p * 1.7 + vec2( t * 0.13, -t * 0.09 ) ) * 0.9;
+}
+
 void main() {
   float depth = clamp( vDepth, 0.0, 1.0 );
 
   // Base colour: clear at the bank, saturated in the middle.
-  vec3 color = mix( uShallow, uDeep, smoothstep( 0.05, 0.85, depth ) );
+  vec3 color = mix( uShallow, uDeep, smoothstep( 0.04, 0.8, depth ) );
 
-  // Caustic-ish shimmer, two layers drifting against each other.
-  float shimmer =
-    vnoise( vWorldXZ * 1.8 + vec2( uTime * 0.22, uTime * 0.16 ) ) * 0.6 +
-    vnoise( vWorldXZ * 3.7 - vec2( uTime * 0.31, uTime * 0.19 ) ) * 0.4;
-  color += vec3( 0.16, 0.22, 0.2 ) * pow( shimmer, 3.0 ) * ( 0.35 + depth );
+  // Surface normal from the ripple field. Without this the pond is a flat disc
+  // of one colour and nothing on it catches the light.
+  float e = 0.16;
+  float h = ripples( vWorldXZ, uTime );
+  float hx = ripples( vWorldXZ + vec2( e, 0.0 ), uTime );
+  float hz = ripples( vWorldXZ + vec2( 0.0, e ), uTime );
+  // Ripples flatten out in the shallows where the bed damps them.
+  float amplitude = 0.09 * smoothstep( 0.0, 0.45, depth );
+  vec3 normal = normalize( vec3( -( hx - h ) * amplitude / e, 1.0, -( hz - h ) * amplitude / e ) );
 
-  // Fresnel: glancing angles pick up the sky, straight-down goes to the bed.
   vec3 viewDir = normalize( cameraPosition - vWorldPosition );
-  float fresnel = pow( 1.0 - clamp( viewDir.y, 0.0, 1.0 ), 3.4 );
-  color = mix( color, uSkyTint, fresnel * 0.34 );
 
-  // Specular glint off the sun.
+  // Fresnel against the *perturbed* normal, so the sky reflection breaks up
+  // across the ripples instead of washing the whole surface evenly.
+  float fresnel = pow( 1.0 - clamp( dot( viewDir, normal ), 0.0, 1.0 ), 3.2 );
+  color = mix( color, uSkyTint, fresnel * 0.42 );
+
+  // Sun on the water: a broad sheen plus a tight glitter.
   vec3 halfway = normalize( uSunDirection + viewDir );
-  float glint = pow( clamp( halfway.y, 0.0, 1.0 ), 90.0 );
-  color += vec3( 1.0, 0.96, 0.85 ) * glint * 0.55;
+  float sheen = pow( clamp( dot( normal, halfway ), 0.0, 1.0 ), 24.0 );
+  float glitter = pow( clamp( dot( normal, halfway ), 0.0, 1.0 ), 220.0 );
+  color += vec3( 1.0, 0.97, 0.88 ) * ( sheen * 0.22 + glitter * 0.9 );
+
+  // Light bouncing off the bed, brightest where the water is thin.
+  float caustic = vnoise( vWorldXZ * 3.1 + vec2( uTime * 0.19, -uTime * 0.14 ) );
+  color += vec3( 0.16, 0.26, 0.22 ) * pow( caustic, 4.0 ) * ( 1.0 - depth * 0.7 );
 
   // Shoreline foam: a wavering band where the water gets thin.
-  float wobble = vnoise( vWorldXZ * 4.2 + uTime * 0.35 ) * 0.06;
-  float foam = smoothstep( 0.1 + wobble, 0.01, depth );
-  color = mix( color, uFoam, foam * 0.55 );
+  float wobble = vnoise( vWorldXZ * 4.6 + uTime * 0.4 ) * 0.05;
+  float foam = smoothstep( 0.13 + wobble, 0.02, depth );
+  color = mix( color, uFoam, foam * 0.75 );
 
-  float alpha = mix( 0.72, 0.97, smoothstep( 0.0, 0.35, depth ) );
-  alpha = max( alpha, foam * 0.9 );
+  // Fade out completely at the waterline — anything else leaves a hard rim of
+  // half-opaque blue sitting on the grass.
+  float alpha = smoothstep( 0.0, 0.07, depth ) * mix( 0.62, 0.96, smoothstep( 0.0, 0.4, depth ) );
+  alpha = max( alpha, foam * smoothstep( 0.0, 0.03, depth ) );
 
   float luma = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
   color = mix( mix( vec3( luma ), vec3( 0.55, 0.6, 0.63 ) * ( 0.5 + luma * 0.7 ), 0.5 ), color, uHeal );

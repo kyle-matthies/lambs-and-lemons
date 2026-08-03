@@ -665,4 +665,4 @@ export function normalizedSpeed(state: GameState) {
 }
 
 export type { World }
-export { canServeNow, nearestLostCritter } from './critters'
+export { canServeNow, nearestLostCritter, preFreeCritters } from './critters'

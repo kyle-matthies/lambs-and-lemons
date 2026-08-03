@@ -273,6 +273,24 @@ export function nearestLostCritter(state: GameState) {
   return best
 }
 
+/**
+ * Put the first `count` creatures straight into the flock. Used by the `?flock=`
+ * debug link so the trailing line can be looked at without playing a whole
+ * round — it's the hardest part of the game to inspect any other way.
+ */
+export function preFreeCritters(state: GameState, count: number) {
+  for (const critter of state.critters) {
+    if (state.flockSize >= count) break
+    if (critter.state !== 'lost') continue
+    critter.state = 'follower'
+    critter.x = state.player.x
+    critter.z = state.player.z
+    state.flockSize += 1
+    state.stats.crittersFreed += 1
+    state.inventory.sold += 1
+  }
+}
+
 export function countLost(critters: Critter[]) {
   let lost = 0
   for (const critter of critters) if (critter.state === 'lost') lost += 1

@@ -169,7 +169,6 @@ export function createTerrain(
     map: detailTexture,
     roughness: 0.96,
     metalness: 0,
-    dithering: true,
   })
   applyValleyShading(material, uniforms, { bloom: true, rim: 0.35 })
 

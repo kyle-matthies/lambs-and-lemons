@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { assetPaths } from './assets'
-import { createGame, drainEvents, serveCup, swingHammer, takeSnapshot, updateGame } from './engine'
+import {
+  createGame,
+  drainEvents,
+  preFreeCritters,
+  serveCup,
+  swingHammer,
+  takeSnapshot,
+  updateGame,
+} from './engine'
 import { useKeyboardInput } from './input'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
 import { GameHud, StartOverlay, EndOverlay } from './ArcadeOverlays'
@@ -161,6 +169,8 @@ export function GameCanvas({
       const savedQuality = readQuality()
       const healParam = params.get('heal')
       const game = createGame(roundMinutesRef.current, autoStart ? 'playing' : 'ready')
+      const flockParam = Number(params.get('flock'))
+      if (Number.isFinite(flockParam) && flockParam > 0) preFreeCritters(game, flockParam)
       gameRef.current = game
       lastPhaseRef.current = game.phase
       try {

@@ -97,9 +97,14 @@ npm install
 npm run dev
 ```
 
-Handy URL parameters: `?mode=arcade|stand` opens a mode directly, `&go=1` skips
-the round-setup card, and `&heal=0..1` pins how far the valley has recovered —
-useful for looking at the art at both ends of the range.
+Handy URL parameters:
+
+| Parameter | Effect |
+| --- | --- |
+| `?mode=arcade\|stand` | Open a mode directly |
+| `&go=1` | Skip the round-setup card |
+| `&heal=0..1` | Pin how far the valley has recovered — for looking at the art at both ends of the range |
+| `&flock=N` | Start with N creatures already following, which is otherwise the hardest thing in the game to get a look at |
 
 ## Checks
 
