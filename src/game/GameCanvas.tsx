@@ -4,6 +4,7 @@ import { assetPaths } from './assets'
 import {
   createGame,
   drainEvents,
+  finishRound,
   preFreeCritters,
   serveCup,
   swingHammer,
@@ -171,6 +172,10 @@ export function GameCanvas({
       const game = createGame(roundMinutesRef.current, autoStart ? 'playing' : 'ready')
       const flockParam = Number(params.get('flock'))
       if (Number.isFinite(flockParam) && flockParam > 0) preFreeCritters(game, flockParam)
+      const overParam = params.get('over')
+      if (overParam === 'woke' || overParam === 'sunset') {
+        finishRound(game, overParam === 'woke' ? 'valleyWoke' : 'sunset')
+      }
       gameRef.current = game
       lastPhaseRef.current = game.phase
       try {
@@ -417,7 +422,10 @@ export function GameCanvas({
       <section className="phone-stage world" ref={stageRef} aria-label="Lambs & Lemons: The Sour Valley">
         <canvas className="game-canvas" ref={canvasRef} aria-hidden="true" />
         <div className="floater-layer" ref={floaterLayerRef} aria-hidden="true" />
-        <GameHud snapshot={snapshot} best={bestForRound} />
+
+        {/* Held back until the world exists — a HUD full of zeros over an empty
+            canvas is worse than no HUD. */}
+        {ready && <GameHud snapshot={snapshot} best={bestForRound} />}
 
         {!ready && <div className="loading-panel">Growing the valley…</div>}
 
@@ -454,7 +462,10 @@ export function GameCanvas({
           {muted ? '🔇' : '🔊'}
         </button>
 
-        <div className="controls-layer" aria-hidden={snapshot.phase !== 'playing'}>
+        <div
+          className={`controls-layer${snapshot.phase === 'playing' ? '' : ' idle'}`}
+          aria-hidden={snapshot.phase !== 'playing'}
+        >
           <div
             className="joystick"
             onPointerDown={(event) => {

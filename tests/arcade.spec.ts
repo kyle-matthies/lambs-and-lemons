@@ -59,8 +59,10 @@ test('arcade round: move with joystick while smashing, score increases', async (
     pointerType: 'touch',
   })
 
+  // Software rendering runs the simulation well below real time, so this needs
+  // more swings than a real player would take to land the same hits.
   const smash = page.locator('.smash-control')
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 14; index += 1) {
     await smash.dispatchEvent('pointerdown', { pointerId: 12, pointerType: 'touch' })
     await page.waitForTimeout(320)
   }

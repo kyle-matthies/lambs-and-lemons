@@ -1474,3 +1474,18 @@ button:focus-visible,
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/* The joystick and action button fade out whenever a card is up — they're not
+   interactive then, and leaving them lit reads as a broken UI. */
+.controls-layer.idle {
+  opacity: 0.35;
+  filter: saturate(0.5);
+  pointer-events: none;
+  transition: opacity 220ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .controls-layer.idle {
+    transition: none;
+  }
+}

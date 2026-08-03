@@ -170,6 +170,9 @@ export function createGame(
   for (let index = 0; index < 10; index += 1) state.lemons.push(spawnLooseItem(state, rng))
   for (let index = 0; index < 6; index += 1) state.leaves.push(spawnLooseItem(state, rng))
   state.player.y = world.heightAt(state.player.x, state.player.z)
+  // Self-consistent from the first frame: the HUD snapshots this before the
+  // update loop has run even once.
+  state.bloomCoverage = bloomCoverage(state.bloomField, world.playRadius)
 
   return state
 }
@@ -226,10 +229,35 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
   state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
 }
 
+/**
+ * Jump a round straight to its end card. Exported for the `?over=` debug link:
+ * the ending is the emotional payoff of the whole design, and it is otherwise
+ * only reachable by playing a full round, which makes it nearly impossible to
+ * inspect or screenshot.
+ */
+export function finishRound(state: GameState, outcome: 'sunset' | 'valleyWoke') {
+  if (outcome === 'valleyWoke') {
+    for (const critter of state.critters) {
+      if (critter.state === 'lost') {
+        critter.state = 'follower'
+        state.flockSize += 1
+        state.stats.crittersFreed += 1
+        state.inventory.sold += 1
+        state.inventory.score += SCORE_CUP
+      }
+    }
+  }
+  state.timeLeft = 0
+  endRound(state, outcome)
+}
+
 function endRound(state: GameState, outcome: GameState['outcome']) {
   state.phase = 'ended'
   state.outcome = outcome
   state.brewProgress = 0
+  // The summary card reports this, and the update loop stops running the moment
+  // the phase flips — so it has to be refreshed here or it reads a stale zero.
+  state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
   if (outcome === 'valleyWoke') {
     state.inventory.score += SCORE_VALLEY_WOKE
     // The last cup tips it over: colour rushes out to every corner at once.

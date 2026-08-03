@@ -36,8 +36,12 @@ export function GameHud({ snapshot, best }: { snapshot: GameSnapshot; best: Best
         />
       </div>
 
-      {snapshot.combo > 0 && <div className="combo-badge">x{snapshot.combo} combo!</div>}
-      {snapshot.flockSize > 0 && (
+      {/* In-play chatter only — these would otherwise peek out from behind the
+          round-over card. */}
+      {snapshot.phase === 'playing' && snapshot.combo > 0 && (
+        <div className="combo-badge">x{snapshot.combo} combo!</div>
+      )}
+      {snapshot.phase === 'playing' && snapshot.flockSize > 0 && (
         <div className="flock-badge" aria-label={`${snapshot.flockSize} friends following`}>
           🐑 ×{snapshot.flockSize}
         </div>
