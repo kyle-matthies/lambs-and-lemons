@@ -9,11 +9,14 @@ import { ValleyRenderer } from '../render/Renderer'
 import {
   readBestScores,
   readLeaderboard,
+  readQuality,
   recordBestRound,
   recordLeaderboard,
+  writeQuality,
   type BestByRound,
   type DecorationId,
   type LeaderboardEntry,
+  type QualityChoice,
 } from '../lib/storage'
 import type { SoundManager } from '../audio/sound'
 import type { GameEvent } from './types'
@@ -127,6 +130,7 @@ export function GameCanvas({
   const [bestByRound, setBestByRound] = useState<BestByRound>({})
   const [isNewBest, setIsNewBest] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [quality, setQuality] = useState<QualityChoice>(() => readQuality())
   roundMinutesRef.current = roundMinutes
 
   const bestForRound = useMemo(
@@ -154,6 +158,7 @@ export function GameCanvas({
         typeof window === 'undefined' ? '' : window.location.search,
       )
       const autoStart = params.get('go') === '1'
+      const savedQuality = readQuality()
       const healParam = params.get('heal')
       const game = createGame(roundMinutesRef.current, autoStart ? 'playing' : 'ready')
       gameRef.current = game
@@ -163,6 +168,9 @@ export function GameCanvas({
           healOverride: healParam === null ? undefined : Number(healParam),
           floaterLayer: floaterLayerRef.current,
           decorations: decorationsRef.current,
+          tier: savedQuality === 'auto' ? undefined : savedQuality,
+          // A manual choice is a choice: don't quietly override it.
+          adaptive: savedQuality === 'auto',
         })
       } catch (error) {
         console.error('Unable to start the 3D renderer', error)
@@ -344,6 +352,14 @@ export function GameCanvas({
     setSnapshot(takeSnapshot(current))
   }
 
+  const handleQualityChange = (choice: QualityChoice) => {
+    setQuality(choice)
+    writeQuality(choice)
+    sound.play('tap')
+    // 'auto' re-detects when the next round builds; a fixed tier applies now.
+    if (choice !== 'auto') rendererRef.current?.setQualityTier(choice)
+  }
+
   /**
    * One button does both jobs. Standing next to someone who needs a cup, it hands
    * the cup over; the rest of the time it swings the mallet. Two thumbs, one
@@ -399,7 +415,9 @@ export function GameCanvas({
           <StartOverlay
             roundMinutes={roundMinutes}
             best={bestForRound}
+            quality={quality}
             onRoundChange={handleRoundChange}
+            onQualityChange={handleQualityChange}
             onStart={startRound}
             onHome={onExit}
           />
@@ -414,6 +432,17 @@ export function GameCanvas({
             onHome={onExit}
           />
         )}
+
+        {/* Outside the controls strip: it's a setting, not a game control, and
+            the strip is only ~180px tall so anchoring to its top misplaces it. */}
+        <button
+          className="mute-control"
+          type="button"
+          onClick={onToggleMute}
+          aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
+        >
+          {muted ? '🔇' : '🔊'}
+        </button>
 
         <div className="controls-layer" aria-hidden={snapshot.phase !== 'playing'}>
           <div
@@ -441,15 +470,6 @@ export function GameCanvas({
               style={{ transform: `translate(${stick.x}px, ${stick.y}px)` }}
             />
           </div>
-
-          <button
-            className="mute-control"
-            type="button"
-            onClick={onToggleMute}
-            aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
-          >
-            {muted ? '🔇' : '🔊'}
-          </button>
 
           <button
             className={`smash-control${snapshot.canServe ? ' serving' : ''}`}

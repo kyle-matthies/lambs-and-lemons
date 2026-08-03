@@ -187,7 +187,7 @@ export class ValleyRenderer {
     this.uniforms.uBloomOrigin.value.set(BLOOM_ORIGIN, BLOOM_ORIGIN)
     this.uniforms.uBloomInvSize.value = 1 / BLOOM_AREA
     // Never let the world go fully monochrome — a hint of colour survives.
-    this.uniforms.uBloomFloor.value = 0.24
+    this.uniforms.uBloomFloor.value = 0.34
 
     // --- lighting -------------------------------------------------------------
     // Light is the other half of the bloom system. The splat map recolours
@@ -198,7 +198,7 @@ export class ValleyRenderer {
     this.fog = new Fog(PALETTE.sourFog.clone().getHex(), 26, 80)
     this.scene.fog = this.fog
 
-    this.sun = new DirectionalLight(PALETTE.sourSun.clone().getHex(), 1.35)
+    this.sun = new DirectionalLight(PALETTE.sourSun.clone().getHex(), 1.6)
     this.sun.position.copy(SUN_DIRECTION).multiplyScalar(40)
     this.sun.castShadow = this.settings.shadows
     this.configureShadow()
@@ -775,7 +775,7 @@ export class ValleyRenderer {
   private applyDaylight() {
     const heal = this.heal
 
-    this.sun.intensity = lerp(1.35, 2.45, heal)
+    this.sun.intensity = lerp(1.6, 2.5, heal)
     this.sun.color.copy(PALETTE.sourSun).lerp(PALETTE.sunLight, heal)
 
     this.hemisphere.intensity = lerp(0.85, 0.92, heal)
@@ -787,7 +787,7 @@ export class ValleyRenderer {
     this.fog.near = lerp(24, 46, heal)
     this.fog.far = lerp(78, 138, heal)
 
-    this.renderer.toneMappingExposure = lerp(1.08, 1.16, heal)
+    this.renderer.toneMappingExposure = lerp(1.16, 1.2, heal)
     this.uniforms.uRimStrength.value = lerp(0.14, 0.26, heal)
   }
 

@@ -1,7 +1,7 @@
 import { assetPaths } from './assets'
 import { ROUND_OPTIONS } from './constants'
 import type { BestRound, GameSnapshot, RoundMinutes } from './types'
-import type { LeaderboardEntry } from '../lib/storage'
+import type { LeaderboardEntry, QualityChoice } from '../lib/storage'
 import { GAME_TITLE } from '../config'
 
 export function GameHud({ snapshot, best }: { snapshot: GameSnapshot; best: BestRound }) {
@@ -67,16 +67,42 @@ function HudMetric({
   )
 }
 
+/**
+ * Plain-language guidance on round length. Twelve creatures is a lot of ground
+ * to cover, and a minute is genuinely not enough — better to say so than to let
+ * a six-year-old pick it and lose.
+ */
+const ROUND_HINTS: Record<RoundMinutes, string> = {
+  1: 'One minute — a mad dash. You probably won\u2019t save everyone!',
+  2: 'Two minutes — just right. Keep moving and you\u2019ll make it.',
+  3: 'Three minutes — comfy. Time to explore a bit.',
+  4: 'Four minutes — plenty of time. Try for sparkle cups!',
+  5: 'Five minutes — no rush at all.',
+}
+
+const QUALITY_LABELS: Record<QualityChoice, string> = {
+  auto: 'Auto',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+}
+
+const QUALITY_CYCLE: QualityChoice[] = ['auto', 'low', 'medium', 'high']
+
 export function StartOverlay({
   roundMinutes,
   best,
+  quality,
   onRoundChange,
+  onQualityChange,
   onStart,
   onHome,
 }: {
   roundMinutes: RoundMinutes
   best: BestRound
+  quality: QualityChoice
   onRoundChange: (minutes: RoundMinutes) => void
+  onQualityChange: (choice: QualityChoice) => void
   onStart: () => void
   onHome: () => void
 }) {
@@ -85,6 +111,9 @@ export function StartOverlay({
       <div className="start-panel">
         <img className="title-sun" src={assetPaths.sun} alt="" />
         <h1>{GAME_TITLE}</h1>
+        <p className="start-premise">
+          The valley went grey. Find everyone and give them lemonade!
+        </p>
         <div className="round-picker" aria-label="Round length in minutes">
           {ROUND_OPTIONS.map((minutes) => (
             <button
@@ -97,6 +126,7 @@ export function StartOverlay({
             </button>
           ))}
         </div>
+        <p className="round-hint">{ROUND_HINTS[roundMinutes]}</p>
         <button className="start-button" type="button" onClick={onStart}>
           Go!
         </button>
@@ -105,9 +135,22 @@ export function StartOverlay({
           <strong>{best.sold} friends</strong>
           <span>{best.score} points</span>
         </div>
-        <button className="quiet-button" type="button" onClick={onHome}>
-          Home
-        </button>
+        <div className="start-footer">
+          <button className="quiet-button" type="button" onClick={onHome}>
+            Home
+          </button>
+          <button
+            className="quiet-button"
+            type="button"
+            onClick={() =>
+              onQualityChange(
+                QUALITY_CYCLE[(QUALITY_CYCLE.indexOf(quality) + 1) % QUALITY_CYCLE.length],
+              )
+            }
+          >
+            Graphics: {QUALITY_LABELS[quality]}
+          </button>
+        </div>
       </div>
     </div>
   )

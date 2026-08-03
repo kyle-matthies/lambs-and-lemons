@@ -22,6 +22,7 @@ const BEST_KEY = 'lammy-best-v1'
 const BOARD_KEY = 'lammy-board-v1'
 const MUTE_KEY = 'lammy-mute-v1'
 const TYCOON_KEY = 'lammy-tycoon-v1'
+const QUALITY_KEY = 'lammy-quality-v1'
 const LEADERBOARD_SIZE = 8
 
 function readJson<T>(key: string, fallback: T): T {
@@ -81,6 +82,17 @@ export function readMuted(): boolean {
 
 export function writeMuted(muted: boolean) {
   writeJson(MUTE_KEY, muted)
+}
+
+export type QualityChoice = 'auto' | 'low' | 'medium' | 'high'
+
+export function readQuality(): QualityChoice {
+  const value = readJson<QualityChoice>(QUALITY_KEY, 'auto')
+  return value === 'low' || value === 'medium' || value === 'high' ? value : 'auto'
+}
+
+export function writeQuality(choice: QualityChoice) {
+  writeJson(QUALITY_KEY, choice)
 }
 
 export function readTycoonSave(): TycoonSave {

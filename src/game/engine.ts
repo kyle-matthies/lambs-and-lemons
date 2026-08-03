@@ -190,6 +190,7 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
     state.elapsed += dt
     updatePlayer(state, input, dt)
     updateCritters(state, dt)
+    state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
     return
   }
 

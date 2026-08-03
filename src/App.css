@@ -1138,14 +1138,20 @@ button:focus-visible,
   background: #0d1a20;
 }
 
-/* In the immersive stage the mute button would sit right on top of Lammy, so it
-   moves up out of the play area. */
+/* In the immersive stage the mute button sits in the top corner, clear of both
+   Lammy and the action button. It lives outside `.controls-layer` in the DOM so
+   `top` resolves against the whole stage. */
 .phone-stage.world .mute-control {
   left: auto;
-  right: 18px;
-  top: calc(env(safe-area-inset-top) + 8px);
+  right: 14px;
+  top: calc(env(safe-area-inset-top) + 6px);
   bottom: auto;
+  z-index: 5;
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
   transform: none;
+  pointer-events: auto;
 }
 
 .phone-stage.world .hud {
@@ -1153,6 +1159,8 @@ button:focus-visible,
   right: auto;
   width: min(100%, 760px);
   transform: translateX(-50%);
+  /* Leave the top-right corner clear for the mute button. */
+  padding-right: 58px;
 }
 
 @media (min-width: 720px) {
@@ -1439,4 +1447,30 @@ button:focus-visible,
   .world-floater.triumph {
     font-size: 1.5rem;
   }
+}
+
+.start-premise {
+  margin: -2px 0 10px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+  color: #6b5324;
+}
+
+.round-hint {
+  margin: 8px 0 2px;
+  min-height: 2.4em;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+  color: #7a6231;
+}
+
+.start-footer {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
