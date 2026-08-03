@@ -152,12 +152,18 @@ function updateFollower(state: GameState, critter: Critter, dt: number) {
   const player = state.player
   const slot = critter.followIndex
 
-  // Trail in a loose line: each animal aims for a point behind the one in front,
-  // offset side to side so the flock fans out rather than forming a queue.
-  const back = CRITTER_FOLLOW_GAP * (slot + 1)
-  const sway = Math.sin(state.elapsed * 1.1 + slot * 1.7) * 0.75
-  const behindX = player.x - Math.sin(player.facing) * back + Math.cos(player.facing) * sway
-  const behindZ = player.z - Math.cos(player.facing) * back - Math.sin(player.facing) * sway
+  // Fan out behind Lammy rather than queueing up. A pure single-file line reads
+  // as a totem pole from the game's camera — the animals behind simply stack up
+  // the screen. Alternating sides, widening with distance, and a slow weave on
+  // top gives it the shape of a flock.
+  const rank = Math.floor(slot / 2)
+  const back = CRITTER_FOLLOW_GAP * (rank + 1) + (slot % 2) * 0.45
+  const side = (slot % 2 === 0 ? 1 : -1) * (0.55 + rank * 0.42)
+  const weave = Math.sin(state.elapsed * 1.1 + slot * 1.7) * 0.42
+  const lateral = side + weave
+
+  const behindX = player.x - Math.sin(player.facing) * back + Math.cos(player.facing) * lateral
+  const behindZ = player.z - Math.cos(player.facing) * back - Math.sin(player.facing) * lateral
 
   const gap = distance2D(critter.x, critter.z, behindX, behindZ)
   // Hang back when close, sprint when left behind — that catch-up scramble is
