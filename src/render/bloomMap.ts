@@ -22,10 +22,12 @@ import {
  * It is deliberately an *accumulation* target — we never clear between frames, only
  * draw the handful of new splats each tick, so the cost is a few dozen additive
  * quads regardless of how long the round has run.
+ *
+ * The simulation keeps its own coarse mirror of this in `src/game/bloom.ts`; that
+ * one is authoritative for gameplay, this one is what the shaders sample.
  */
 
-export const BLOOM_AREA = 96
-export const BLOOM_ORIGIN = -BLOOM_AREA / 2
+import { BLOOM_AREA } from '../game/bloom'
 
 const MAX_SPLATS_PER_FRAME = 96
 
@@ -111,6 +113,23 @@ export class BloomMap {
   splat(x: number, z: number, radius: number, strength: number) {
     if (this.pending.length >= MAX_SPLATS_PER_FRAME) return
     this.pending.push({ x, z, radius, strength })
+  }
+
+  /**
+   * Fill the buffer completely — the visual half of `floodBloom`, for the moment
+   * the valley wakes. A splat can't do this: its falloff always feathers the rim.
+   */
+  flood(renderer: WebGLRenderer) {
+    const previousTarget = renderer.getRenderTarget()
+    renderer.getClearColor(this.previousClearColor)
+    const previousClearAlpha = renderer.getClearAlpha()
+    renderer.setRenderTarget(this.target)
+    renderer.setClearColor(0xffffff, 1)
+    renderer.clear(true, false, false)
+    renderer.setClearColor(this.previousClearColor, previousClearAlpha)
+    renderer.setRenderTarget(previousTarget)
+    this.pending.length = 0
+    this.needsClear = false
   }
 
   /** Wipe the valley back to grey — called when a fresh round begins. */

@@ -24,8 +24,10 @@ import {
   TREE_WOBBLE_TIME,
 } from '../game/constants'
 import type { GameEvent, GameState } from '../game/types'
-import { BLOOM_AREA, BLOOM_ORIGIN, BloomMap } from './bloomMap'
+import { BLOOM_AREA, BLOOM_ORIGIN } from '../game/bloom'
+import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
+import { CritterHerd } from './critters'
 import { ParticleField, ZestRings } from './fx'
 import {
   buildTreeGeometry,
@@ -60,9 +62,6 @@ import { Water } from './water'
 // Up, to the right, and slightly *toward* the camera's side of the valley, so
 // trunks and Lammy's face catch the key instead of being silhouetted.
 const SUN_DIRECTION = new Vector3(0.52, 0.62, 0.58).normalize()
-
-/** Roughly how much painted area counts as "the valley is alive again". */
-const HEAL_TARGET = 2600
 
 interface TreeVisual {
   group: Group
@@ -100,6 +99,7 @@ export class ValleyRenderer {
   private readonly particles: ParticleField
   private readonly zestRings = new ZestRings(14)
   private readonly lamb: Lamb
+  private critterHerd: CritterHerd | null = null
   private lambShadow: Mesh
   private water: Water | null = null
   private post: PostPipeline | null = null
@@ -113,7 +113,6 @@ export class ValleyRenderer {
   private width = 1
   private height = 1
   private time = 0
-  private healAccumulator = 0
   private heal = 0
   private frameAverage = 16
   private adaptiveTimer = 0
@@ -289,6 +288,9 @@ export class ValleyRenderer {
     this.worldGroup.add(this.leafField.mesh)
     this.worldGroup.add(this.lamb.group)
     this.worldGroup.add(this.lambShadow)
+
+    this.critterHerd = new CritterHerd(state.critters, this.uniforms, this.detailTexture)
+    this.worldGroup.add(this.critterHerd.group)
   }
 
   /**
@@ -299,13 +301,12 @@ export class ValleyRenderer {
     if (this.healOverride !== null && this.healOverride >= 1) {
       // Debug view: flood the whole valley so the fully-recovered look can be
       // inspected without playing a round.
-      this.bloomMap.splat(0, 0, 90, 1)
-      this.healAccumulator = HEAL_TARGET
+      this.bloomMap.flood(this.renderer)
       return
     }
+    // Mirrors the same two seed splats the simulation stamps in `createGame`.
     this.bloomMap.splat(state.stand.x, state.stand.z, 13, 0.95)
     this.bloomMap.splat(state.player.x, state.player.z, 11, 0.85)
-    this.healAccumulator = 13 * 13 * 0.95 + 11 * 11 * 0.85
   }
 
   // -------------------------------------------------------------------------
@@ -341,7 +342,6 @@ export class ValleyRenderer {
     this.bloomMap.reset()
     this.particles.clear()
     this.zestRings.clear()
-    this.healAccumulator = 0
     this.heal = 0
     this.time = 0
 
@@ -380,7 +380,6 @@ export class ValleyRenderer {
       switch (event.type) {
         case 'zest': {
           this.bloomMap.splat(event.x, event.z, event.radius, event.strength)
-          this.healAccumulator += event.radius * event.radius * event.strength
           this.zestRings.spawn(
             event.x,
             state.world.heightAt(event.x, event.z),
@@ -499,20 +498,77 @@ export class ValleyRenderer {
           break
         }
 
-        case 'cupSold': {
-          const spoutY = event.y + 1.5
-          this.particles.burst(event.x, spoutY, event.z, {
-            count: event.sparkle ? 40 : 22,
+        case 'cupBrewed': {
+          // A modest fountain over the stand — brewing is the setup, not the payoff.
+          this.particles.burst(event.x, event.y + 1.5, event.z, {
+            count: event.sparkle ? 26 : 16,
             color: event.sparkle ? PALETTE.lemonLight : PALETTE.juice,
-            speed: [0.8, 2.6],
-            lift: [3.5, 7],
-            size: [0.05, 0.13],
+            speed: [0.7, 2.2],
+            lift: [3, 5.5],
+            size: [0.05, 0.12],
             glow: true,
             gravity: 9,
-            life: [0.6, 1.2],
+            life: [0.5, 1],
           })
-          this.post?.addFlash(event.sparkle ? 0.16 : 0.07)
-          this.followCamera.addShake(event.sparkle ? 0.12 : 0.06, 0.2)
+          this.post?.addFlash(0.05)
+          break
+        }
+
+        case 'critterServed': {
+          // The payoff. Colour erupts out of the creature and washes outward.
+          this.particles.burst(event.x, event.y + 0.7, event.z, {
+            count: event.sparkle ? 64 : 42,
+            color: event.sparkle ? PALETTE.lemonLight : PALETTE.juice,
+            speed: [1.5, 5],
+            lift: [3, 7.5],
+            size: [0.06, 0.16],
+            glow: true,
+            gravity: 7,
+            life: [0.8, 1.6],
+          })
+          this.particles.burst(event.x, event.y + 0.5, event.z, {
+            count: 26,
+            color: PALETTE.flowerPink,
+            speed: [1.2, 4],
+            lift: [2, 5],
+            size: [0.05, 0.13],
+            gravity: 6,
+            life: [0.9, 1.7],
+          })
+          this.post?.addFlash(event.sparkle ? 0.28 : 0.18)
+          this.followCamera.addShake(0.16, 0.3)
+          break
+        }
+
+        case 'flockJoin': {
+          this.particles.burst(event.x, event.y + 0.9, event.z, {
+            count: 18,
+            color: PALETTE.lemonLight,
+            speed: [0.6, 2],
+            lift: [3, 6],
+            size: [0.05, 0.11],
+            glow: true,
+            gravity: 4,
+            life: [0.6, 1.1],
+          })
+          break
+        }
+
+        case 'valleyWoke': {
+          // Everything at once: the whole meadow floods with colour.
+          this.bloomMap.flood(this.renderer)
+          this.particles.burst(event.x, event.y + 1.2, event.z, {
+            count: Math.min(140, this.settings.maxParticles),
+            color: PALETTE.lemonLight,
+            speed: [2, 8],
+            lift: [4, 11],
+            size: [0.07, 0.2],
+            glow: true,
+            gravity: 5,
+            life: [1.2, 2.4],
+          })
+          this.post?.addFlash(0.55)
+          this.followCamera.addShake(0.35, 0.6)
           break
         }
 
@@ -556,8 +612,7 @@ export class ValleyRenderer {
     // --- shared uniforms ------------------------------------------------------
     // Front-load the curve so the first few smashes visibly change the weather —
     // the feedback has to arrive early or the mechanic reads as decoration.
-    const healTarget =
-      this.healOverride ?? Math.pow(clamp01(this.healAccumulator / HEAL_TARGET), 0.6)
+    const healTarget = this.healOverride ?? Math.pow(clamp01(state.bloomCoverage), 0.55)
     this.heal = damp(this.heal, healTarget, 1.6, dt)
     this.applyDaylight()
     this.uniforms.uTime.value = this.time
@@ -571,6 +626,7 @@ export class ValleyRenderer {
     const shadowScale = 1 + clamp01(state.player.speed / PLAYER_SPEED) * 0.18
     this.lambShadow.scale.setScalar(shadowScale)
 
+    this.critterHerd?.update(state.critters, dt, this.time)
     this.lemonField.sync(state.lemons, this.time)
     this.leafField.sync(state.leaves, this.time)
     this.updateTrees(state)
@@ -707,6 +763,7 @@ export class ValleyRenderer {
     this.sky.dispose()
     this.horizon.dispose()
     this.lamb.dispose()
+    this.critterHerd?.dispose()
     for (const set of this.treeGeometries) {
       set.full.dispose()
       set.stump.dispose()

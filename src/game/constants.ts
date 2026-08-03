@@ -55,17 +55,41 @@ export const MAX_GROUND_LEAVES = 14
 // Lemonade stand: auto-brews while Lammy stands close and carries lemon parts.
 // A leaf (when available) upgrades the cup to a double-value sparkle cup.
 export const BREW_TIME = 0.7
-export const LEMON_PARTS_PER_CUP = 2
+export const LEMON_PARTS_PER_CUP = 3
 
 // Combo: quick consecutive hits build a streak. Bonuses only, never a penalty.
 export const COMBO_WINDOW = 1.4
 export const COMBO_MIN_LEVEL = 3
 
+// The lost creatures of the valley.
+export const CRITTER_COUNT = 12
+export const CRITTER_KINDS = ['lamb', 'bunny', 'piglet'] as const
+export const CRITTER_SPEED_LOST = 1.05
+export const CRITTER_SPEED_FOLLOW = 8.4
+export const CRITTER_WANDER_RADIUS = 3.4
+/** Spacing between animals in the line trailing Lammy. */
+export const CRITTER_FOLLOW_GAP = 1.35
+/** How long the colour takes to flood back through a served critter. */
+export const CRITTER_BLOOM_TIME = 1.1
+export const SERVE_RADIUS = 2.1
+/** Cups Lammy can carry at once. Small on purpose — it forces round trips. */
+export const CUP_CAPACITY = 3
+
+// The flock leaves colour behind it as it runs.
+export const FLOCK_TRAIL_INTERVAL = 0.35
+export const FLOCK_TRAIL_RADIUS = 3.2
+/** Each freed friend helps a little: wider reach, quicker brewing. */
+export const FLOCK_PICKUP_BONUS = 0.13
+export const FLOCK_PICKUP_BONUS_CAP = 1.05
+export const FLOCK_BREW_BONUS = 0.055
+export const FLOCK_BREW_BONUS_CAP = 0.4
+
 // Zest — the colour a smash pours back into the valley.
-export const ZEST_RADIUS_SMASH = 3.6
+export const ZEST_RADIUS_SMASH = 4.2
 export const ZEST_RADIUS_TREE_HIT = 4.4
 export const ZEST_RADIUS_TREE_BREAK = 7.5
-export const ZEST_RADIUS_CUP = 9
+export const ZEST_RADIUS_CUP = 6.5
+export const ZEST_RADIUS_BLOOM = 15
 
 // Scoring
 export const SCORE_PICKUP = 1
@@ -73,6 +97,9 @@ export const SCORE_SMASH = 1
 export const SCORE_TREE_HIT = 2
 export const SCORE_CUP = 5
 export const SCORE_SPARKLE_CUP = 10
+export const SCORE_BREW = 2
+/** Waking the whole valley before sunset is worth more than any single act. */
+export const SCORE_VALLEY_WOKE = 50
 export const SCORE_COMBO_BONUS = 1
 
 export const COUNTDOWN_TICKS_FROM = 5

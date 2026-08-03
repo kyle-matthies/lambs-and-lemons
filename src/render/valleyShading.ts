@@ -54,6 +54,12 @@ export function createValleyUniforms(): ValleyUniforms {
 }
 
 export interface ValleyShadingOptions {
+  /**
+   * Per-material override that forces a surface to count as healed regardless of
+   * what the world bloom map says at its position. Creatures need this: once
+   * you've given one a cup it stays in colour even while standing in grey grass.
+   */
+  localHeal?: IUniform<number>
   /** Sway amplitude in metres at full gust. 0 disables the wind path entirely. */
   wind?: number
   /** Read per-vertex `aSway` instead of falling back to local Y. */
@@ -94,6 +100,10 @@ uniform vec3 uRimColor;
 uniform float uRimStrength;
 uniform vec3 uSunViewDirection;
 varying vec3 vWorldPosition;
+`
+
+const LOCAL_HEAL_DECLARATION = /* glsl */ `
+uniform float uLocalHeal;
 `
 
 function projectChunk(options: ValleyShadingOptions) {
@@ -164,6 +174,7 @@ function bloomChunk(options: ValleyShadingOptions) {
     vec2 bloomUv = ( vWorldPosition.xz - uBloomOrigin ) * uBloomInvSize;
     float healed = texture2D( uBloomMap, bloomUv ).r;
     healed = clamp( healed * uBloomGain + uBloomFloor + ${floor.toFixed(3)}, 0.0, 1.0 );
+${options.localHeal ? '    healed = max( healed, uLocalHeal );' : ''}
     // Ease the ramp so the leading edge of a splat reads as a soft wash of colour
     // returning rather than a hard circle.
     healed = healed * healed * ( 3.0 - 2.0 * healed );
@@ -216,10 +227,12 @@ export function applyValleyShading(
   uniforms: ValleyUniforms,
   options: ValleyShadingOptions = {},
 ) {
-  const key = JSON.stringify(options)
+  const { localHeal, ...cacheableOptions } = options
+  const key = `${JSON.stringify(cacheableOptions)}:${localHeal ? 'local' : 'world'}`
 
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
+    if (options.localHeal) shader.uniforms.uLocalHeal = options.localHeal
 
     let defines = ''
     if (options.swayAttribute) defines += '#define VLY_SWAY_ATTRIBUTE\n'
@@ -230,7 +243,12 @@ export function applyValleyShading(
       .replace('#include <project_vertex>', projectChunk(options))
 
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `${FRAGMENT_DECLARATIONS}\n#include <common>`)
+      .replace(
+        '#include <common>',
+        `${FRAGMENT_DECLARATIONS}${
+          options.localHeal ? LOCAL_HEAL_DECLARATION : ''
+        }\n#include <common>`,
+      )
       .replace('#include <color_fragment>', `#include <color_fragment>\n${bloomChunk(options)}`)
       .replace(
         '#include <lights_fragment_end>',

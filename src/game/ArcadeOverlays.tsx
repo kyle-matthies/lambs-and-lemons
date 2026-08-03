@@ -5,19 +5,43 @@ import type { LeaderboardEntry } from '../lib/storage'
 import { GAME_TITLE } from '../config'
 
 export function GameHud({ snapshot, best }: { snapshot: GameSnapshot; best: BestRound }) {
+  const friendsTotal = snapshot.stats.crittersFreed + snapshot.lostCritters
+  const bloomPercent = Math.round(snapshot.bloomCoverage * 100)
+
   return (
     <div className="hud">
       <div className="hud-row primary">
-        <HudMetric label="Time" value={formatTime(snapshot.timeLeft)} />
-        <HudMetric label="Sold" value={`${snapshot.sold}`} detail={`Best ${best.sold}`} />
+        <HudMetric label="Sunset" value={formatTime(snapshot.timeLeft)} />
+        <HudMetric
+          label="Friends"
+          value={`${snapshot.stats.crittersFreed}/${friendsTotal}`}
+          detail={`Best ${best.sold}`}
+        />
         <HudMetric label="Points" value={`${snapshot.score}`} detail={`Best ${best.score}`} />
       </div>
+
+      {/* How much of the valley has its colour back — the real objective. */}
+      <div className="bloom-meter" aria-label={`Valley colour restored: ${bloomPercent} percent`}>
+        <div className="bloom-fill" style={{ width: `${Math.min(100, bloomPercent)}%` }} />
+        <span className="bloom-label">🌈 {bloomPercent}%</span>
+      </div>
+
       <div className="hud-row inventory">
         <HudMetric image={assetPaths.lemon} label="Lemons" value={`${snapshot.lemons}`} />
         <HudMetric image={assetPaths.splat} label="Juice" value={`${snapshot.juice}`} />
-        <HudMetric image={assetPaths.leaf} label="Leaves" value={`${snapshot.leaves}`} />
+        <HudMetric
+          label="Cups"
+          value={`${snapshot.cups}`}
+          detail={snapshot.sparkleCups > 0 ? `✨ ${snapshot.sparkleCups}` : undefined}
+        />
       </div>
+
       {snapshot.combo > 0 && <div className="combo-badge">x{snapshot.combo} combo!</div>}
+      {snapshot.flockSize > 0 && (
+        <div className="flock-badge" aria-label={`${snapshot.flockSize} friends following`}>
+          🐑 ×{snapshot.flockSize}
+        </div>
+      )}
     </div>
   )
 }
@@ -78,7 +102,7 @@ export function StartOverlay({
         </button>
         <div className="best-strip">
           <span>{roundMinutes} min</span>
-          <strong>{best.sold} sold</strong>
+          <strong>{best.sold} friends</strong>
           <span>{best.score} points</span>
         </div>
         <button className="quiet-button" type="button" onClick={onHome}>
@@ -103,12 +127,32 @@ export function EndOverlay({
   onHome: () => void
 }) {
   const stats = snapshot.stats
+  const woke = snapshot.outcome === 'valleyWoke'
+  const bloomPercent = Math.round(snapshot.bloomCoverage * 100)
+
   return (
     <div className="game-overlay">
-      <div className="end-panel">
-        {isNewBest ? <h2 className="new-best">NEW BEST!</h2> : <h2>Round over</h2>}
+      <div className={`end-panel${woke ? ' triumphant' : ''}`}>
+        {woke ? (
+          <>
+            <h2 className="new-best">THE VALLEY WOKE UP!</h2>
+            <p className="end-blurb">Everyone got a cup. The colour is back for good.</p>
+          </>
+        ) : isNewBest ? (
+          <h2 className="new-best">NEW BEST!</h2>
+        ) : (
+          <>
+            <h2>The sun went down</h2>
+            <p className="end-blurb">
+              {snapshot.lostCritters === 1
+                ? 'One friend is still waiting in the grey.'
+                : `${snapshot.lostCritters} friends are still waiting in the grey.`}
+            </p>
+          </>
+        )}
         <div className="stat-rows">
-          <StatRow icon="🥤" label="Cups sold" value={stats.cupsSold} />
+          <StatRow icon="💛" label="Friends helped" value={stats.crittersFreed} />
+          <StatRow icon="🌈" label="Valley colour" value={bloomPercent} suffix="%" />
           {stats.sparkleCups > 0 && (
             <StatRow icon="✨" label="Sparkle cups" value={stats.sparkleCups} />
           )}
@@ -121,7 +165,7 @@ export function EndOverlay({
             {leaderboard.map((entry, index) => (
               <li key={entry.at}>
                 <span className="rank">{index + 1}</span>
-                <strong>{entry.sold} 🥤</strong>
+                <strong>{entry.sold} 💛</strong>
                 <span>{entry.score} pts</span>
                 <span className="mins">{entry.minutes} min</span>
               </li>
@@ -139,12 +183,25 @@ export function EndOverlay({
   )
 }
 
-function StatRow({ icon, label, value }: { icon: string; label: string; value: number }) {
+function StatRow({
+  icon,
+  label,
+  value,
+  suffix,
+}: {
+  icon: string
+  label: string
+  value: number
+  suffix?: string
+}) {
   return (
     <div className="stat-row">
       <span className="stat-icon">{icon}</span>
       <span className="stat-label">{label}</span>
-      <strong>{value}</strong>
+      <strong>
+        {value}
+        {suffix}
+      </strong>
     </div>
   )
 }

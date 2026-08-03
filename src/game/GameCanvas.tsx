@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { assetPaths } from './assets'
-import { createGame, drainEvents, swingHammer, takeSnapshot, updateGame } from './engine'
+import { createGame, drainEvents, serveCup, swingHammer, takeSnapshot, updateGame } from './engine'
 import { useKeyboardInput } from './input'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
 import { GameHud, StartOverlay, EndOverlay } from './ArcadeOverlays'
@@ -29,10 +29,17 @@ const emptySnapshot: GameSnapshot = {
   lemons: 0,
   juice: 0,
   leaves: 0,
+  cups: 0,
+  sparkleCups: 0,
   nearStand: false,
   brewing: false,
   brewProgress: 0,
   combo: 0,
+  flockSize: 0,
+  lostCritters: 0,
+  bloomCoverage: 0,
+  canServe: false,
+  outcome: null,
   stats: {
     lemonsSmashed: 0,
     treeHits: 0,
@@ -41,6 +48,7 @@ const emptySnapshot: GameSnapshot = {
     leavesCollected: 0,
     cupsSold: 0,
     sparkleCups: 0,
+    crittersFreed: 0,
   },
 }
 
@@ -53,6 +61,8 @@ const EVENT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['p
   pickupLemon: 'pop',
   pickupLeaf: 'pop',
   countdown: 'tick',
+  cupBrewed: 'ding',
+  flockJoin: 'coin',
 }
 
 export function GameCanvas({
@@ -180,9 +190,10 @@ export function GameCanvas({
           for (const event of events) {
             const sfx = EVENT_SOUNDS[event.type]
             if (sfx) soundRef.current.play(sfx)
-            if (event.type === 'cupSold') {
-              soundRef.current.play(event.sparkle ? 'sparkle' : 'ding')
+            if (event.type === 'critterServed') {
+              soundRef.current.play(event.sparkle ? 'sparkle' : 'cheer')
             }
+            if (event.type === 'valleyWoke') soundRef.current.play('fanfare')
           }
         }
 
@@ -251,13 +262,19 @@ export function GameCanvas({
     setSnapshot(takeSnapshot(current))
   }
 
-  const handleSwing = useCallback(() => {
+  /**
+   * One button does both jobs. Standing next to someone who needs a cup, it hands
+   * the cup over; the rest of the time it swings the mallet. Two thumbs, one
+   * verb — which is all a six-year-old should have to think about.
+   */
+  const handleAction = useCallback(() => {
     const game = gameRef.current
     if (!game) return
+    if (serveCup(game)) return
     swingHammer(game)
   }, [])
 
-  useKeyboardInput(inputRef, joystickActiveRef, handleSwing)
+  useKeyboardInput(inputRef, joystickActiveRef, handleAction)
 
   const updateJoystick = (event: PointerEvent<HTMLDivElement>) => {
     const target = event.currentTarget
@@ -352,15 +369,22 @@ export function GameCanvas({
           </button>
 
           <button
-            className="smash-control"
+            className={`smash-control${snapshot.canServe ? ' serving' : ''}`}
             type="button"
+            aria-label={snapshot.canServe ? 'Give a cup' : 'Smash'}
             onPointerDown={(event) => {
               event.preventDefault()
-              handleSwing()
+              handleAction()
             }}
           >
-            <img src={assetPaths.smashButton} alt="" />
-            <span>Smash</span>
+            {snapshot.canServe ? (
+              <span className="serve-glyph" aria-hidden="true">
+                🥤
+              </span>
+            ) : (
+              <img src={assetPaths.smashButton} alt="" />
+            )}
+            <span>{snapshot.canServe ? 'Give!' : 'Smash'}</span>
           </button>
         </div>
       </section>

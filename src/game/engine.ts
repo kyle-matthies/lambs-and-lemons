@@ -1,6 +1,13 @@
 import { clamp, damp, dampAngle, distance2D } from '../core/math'
 import { mulberry32, randRange, type Rng } from '../core/rng'
 import {
+  CUP_CAPACITY,
+  FLOCK_BREW_BONUS,
+  FLOCK_BREW_BONUS_CAP,
+  FLOCK_PICKUP_BONUS,
+  FLOCK_PICKUP_BONUS_CAP,
+  SCORE_BREW,
+  SCORE_VALLEY_WOKE,
   BREW_TIME,
   BURST_ON_BREAK,
   BURST_PER_HIT,
@@ -45,7 +52,10 @@ import {
   ZEST_RADIUS_TREE_BREAK,
   ZEST_RADIUS_TREE_HIT,
 } from './constants'
+import { bloomCoverage, createBloomField, floodBloom, stampBloom } from './bloom'
+import { canServeNow, countLost, serveNearestCritter, spawnCritters, updateCritters } from './critters'
 import type {
+  Critter,
   GameInput,
   GamePhase,
   GameSnapshot,
@@ -113,7 +123,12 @@ export function createGame(
     trees,
     lemons: [],
     leaves: [],
-    inventory: { lemons: 0, juice: 0, leaves: 0, sold: 0, score: 0 },
+    critters: spawnCritters(world, seed),
+    flockSize: 0,
+    bloomField: createBloomField(),
+    bloomCoverage: 0,
+    outcome: null,
+    inventory: { lemons: 0, juice: 0, leaves: 0, cups: 0, sparkleCups: 0, sold: 0, score: 0 },
     stats: {
       lemonsSmashed: 0,
       treeHits: 0,
@@ -122,6 +137,7 @@ export function createGame(
       leavesCollected: 0,
       cupsSold: 0,
       sparkleCups: 0,
+      crittersFreed: 0,
     },
     brewProgress: 0,
     comboCount: 0,
@@ -132,6 +148,11 @@ export function createGame(
     events: [],
     nextId,
   }
+
+  // The stand and Lammy's own patch start with a little colour — the valley is
+  // fading, not dead.
+  stampBloom(state.bloomField, state.stand.x, state.stand.z, 13, 0.95)
+  stampBloom(state.bloomField, state.player.x, state.player.z, 11, 0.85)
 
   // A ring of fruit within a couple of strides of the start, so the very first
   // swing always connects. Nothing kills an opening like whiffing at empty grass.
@@ -177,13 +198,12 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
     }
   }
   if (state.timeLeft <= 0) {
-    state.phase = 'ended'
-    state.brewProgress = 0
-    state.events.push({ type: 'timeUp' })
+    endRound(state, 'sunset')
     return
   }
 
   updatePlayer(state, input, dt)
+  updateCritters(state, dt)
 
   state.comboTimer = Math.max(0, state.comboTimer - dt)
   if (state.comboTimer === 0) state.comboCount = 0
@@ -191,6 +211,40 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
   updateSpawning(state, dt)
   collectItems(state)
   updateBrewing(state, dt)
+  state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+}
+
+function endRound(state: GameState, outcome: GameState['outcome']) {
+  state.phase = 'ended'
+  state.outcome = outcome
+  state.brewProgress = 0
+  if (outcome === 'valleyWoke') {
+    state.inventory.score += SCORE_VALLEY_WOKE
+    // The last cup tips it over: colour rushes out to every corner at once.
+    floodBloom(state.bloomField)
+    state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+    state.events.push({
+      type: 'valleyWoke',
+      x: state.player.x,
+      y: state.player.y,
+      z: state.player.z,
+    })
+  } else {
+    state.events.push({ type: 'timeUp' })
+  }
+}
+
+/** Each freed friend widens Lammy's reach a little. */
+function pickupRadius(state: GameState) {
+  return (
+    PICKUP_RADIUS + Math.min(FLOCK_PICKUP_BONUS_CAP, state.flockSize * FLOCK_PICKUP_BONUS)
+  )
+}
+
+/** ...and lends a hoof at the stand. */
+function brewDuration(state: GameState) {
+  const help = Math.min(FLOCK_BREW_BONUS_CAP, state.flockSize * FLOCK_BREW_BONUS)
+  return BREW_TIME * (1 - help)
 }
 
 function updatePlayer(state: GameState, input: GameInput, dt: number) {
@@ -314,10 +368,17 @@ export function takeSnapshot(state: GameState): GameSnapshot {
     lemons: state.inventory.lemons,
     juice: state.inventory.juice,
     leaves: state.inventory.leaves,
+    cups: state.inventory.cups,
+    sparkleCups: state.inventory.sparkleCups,
     nearStand: isNearStand(state),
     brewing: state.brewProgress > 0,
     brewProgress: state.brewProgress,
     combo: state.comboCount >= COMBO_MIN_LEVEL ? state.comboCount : 0,
+    flockSize: state.flockSize,
+    lostCritters: countLost(state.critters),
+    bloomCoverage: state.bloomCoverage,
+    canServe: canServeNow(state),
+    outcome: state.outcome,
     stats: { ...state.stats },
   }
 }
@@ -327,6 +388,7 @@ export function isNearStand(state: GameState) {
 }
 
 function pourZest(state: GameState, x: number, z: number, radius: number, strength: number) {
+  stampBloom(state.bloomField, x, z, radius, strength)
   state.events.push({ type: 'zest', x, z, radius, strength })
 }
 
@@ -344,13 +406,14 @@ function lemonParts(state: GameState) {
 }
 
 function updateBrewing(state: GameState, dt: number) {
-  const canBrew = isNearStand(state) && lemonParts(state) >= LEMON_PARTS_PER_CUP
+  const hasRoom = state.inventory.cups < CUP_CAPACITY
+  const canBrew = isNearStand(state) && hasRoom && lemonParts(state) >= LEMON_PARTS_PER_CUP
   if (!canBrew) {
     state.brewProgress = 0
     return
   }
 
-  state.brewProgress += dt / BREW_TIME
+  state.brewProgress += dt / brewDuration(state)
   if (state.brewProgress < 1) return
   state.brewProgress = 0
 
@@ -360,22 +423,41 @@ function updateBrewing(state: GameState, dt: number) {
   partsNeeded -= juiceUsed
   state.inventory.lemons -= partsNeeded
 
+  // A leaf on hand turns this into a sparkle cup, worth double when it's given.
   const sparkle = state.inventory.leaves > 0
   if (sparkle) {
     state.inventory.leaves -= 1
-    state.stats.sparkleCups += 1
+    state.inventory.sparkleCups += 1
   }
-  state.inventory.sold += 1
-  state.stats.cupsSold += 1
-  state.inventory.score += sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
+  state.inventory.cups += 1
+  state.inventory.score += SCORE_BREW
   state.events.push({
-    type: 'cupSold',
+    type: 'cupBrewed',
     x: state.stand.x,
     y: state.stand.y,
     z: state.stand.z,
     sparkle,
   })
-  pourZest(state, state.stand.x, state.stand.z, ZEST_RADIUS_CUP * (sparkle ? 1.3 : 1), 1)
+  pourZest(state, state.stand.x, state.stand.z, ZEST_RADIUS_CUP * (sparkle ? 1.3 : 1), 0.9)
+}
+
+/**
+ * Give a cup to the nearest lost creature. Brewing is the chore; this is the
+ * point of the round, and the moment the valley gets a piece of itself back.
+ */
+export function serveCup(state: GameState): Critter | null {
+  if (state.phase !== 'playing') return null
+  const served = serveNearestCritter(state)
+  if (!served) return null
+
+  state.inventory.sold += 1
+  state.stats.cupsSold += 1
+  state.stats.crittersFreed += 1
+  if (served.sparkle) state.stats.sparkleCups += 1
+  state.inventory.score += served.sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
+
+  if (countLost(state.critters) === 0) endRound(state, 'valleyWoke')
+  return served.critter
 }
 
 function updateTrees(state: GameState, dt: number) {
@@ -532,10 +614,11 @@ function updateItems(state: GameState, items: GroundItem[], dt: number) {
 
 function collectItems(state: GameState) {
   const player = state.player
+  const reach = pickupRadius(state)
 
   const keptLemons: GroundItem[] = []
   for (const lemon of state.lemons) {
-    if (distance2D(lemon.x, lemon.z, player.x, player.z) < PICKUP_RADIUS) {
+    if (distance2D(lemon.x, lemon.z, player.x, player.z) < reach) {
       state.inventory.lemons += 1
       state.inventory.score += SCORE_PICKUP
       state.stats.lemonsCollected += 1
@@ -548,7 +631,7 @@ function collectItems(state: GameState) {
 
   const keptLeaves: GroundItem[] = []
   for (const leaf of state.leaves) {
-    if (distance2D(leaf.x, leaf.z, player.x, player.z) < PICKUP_RADIUS) {
+    if (distance2D(leaf.x, leaf.z, player.x, player.z) < reach) {
       state.inventory.leaves += 1
       state.inventory.score += SCORE_PICKUP
       state.stats.leavesCollected += 1
@@ -570,3 +653,4 @@ export function normalizedSpeed(state: GameState) {
 }
 
 export type { World }
+export { canServeNow, nearestLostCritter } from './critters'
