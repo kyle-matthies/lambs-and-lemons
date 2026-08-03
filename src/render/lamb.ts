@@ -139,6 +139,28 @@ function buildHead(rng: Rng) {
   return merged
 }
 
+/**
+ * Two lids that drop over the eyes for a blink.
+ *
+ * The eyes themselves are baked into the merged head, so they can't be animated
+ * — but a pair of skin-coloured caps in front of them can, and a blink every few
+ * seconds is the difference between a character and a doll.
+ */
+function buildEyelids() {
+  const parts: BufferGeometry[] = []
+  for (const side of [-1, 1]) {
+    // Comfortably larger than the eye and sitting proud of it, so a closed lid
+    // never leaves a sliver of iris showing through.
+    const lid = new SphereGeometry(0.072, 10, 8)
+    lid.scale(1, 1, 0.7)
+    lid.translate(side * 0.095, 0.038, 0.178)
+    parts.push(paint(lid, PALETTE.skin.clone().multiplyScalar(1.02)))
+  }
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
 function buildEar() {
   const ear = new SphereGeometry(0.09, 9, 7)
   ear.scale(1.55, 0.42, 0.85)
@@ -226,6 +248,7 @@ export class Lamb {
   private readonly body = new Group()
   private readonly bodyMesh: Mesh
   private readonly headPivot = new Group()
+  private readonly eyelids: Mesh
   private readonly ears: Object3D[] = []
   private readonly legs: LegRig[] = []
   private readonly tail: Mesh
@@ -234,6 +257,9 @@ export class Lamb {
 
   private lean = 0
   private previousFacing = 0
+  private blinkTimer = 2.5
+  private blinkProgress = 0
+  private cheerTimer = 0
   private earAngle = 0
   private earVelocity = 0
   private bounceMemory = 0
@@ -257,6 +283,10 @@ export class Lamb {
     const headMesh = new Mesh(buildHead(rng), material)
     headMesh.castShadow = true
     this.headPivot.add(headMesh)
+
+    this.eyelids = new Mesh(buildEyelids(), material)
+    this.eyelids.visible = false
+    this.headPivot.add(this.eyelids)
 
     const earGeometry = buildEar()
     for (const side of [-1, 1]) {
@@ -305,6 +335,14 @@ export class Lamb {
     this.armPivot.add(this.malletMesh)
   }
 
+  /**
+   * A little hop of delight. Called when Lammy hands someone a cup — the moment
+   * the whole round is built around should show on her, not just in the HUD.
+   */
+  cheer(duration = 0.75) {
+    this.cheerTimer = duration
+  }
+
   /** World-space position of the mallet head — drives the swing trail and impacts. */
   getMalletTip<T extends { x: number; y: number; z: number }>(target: T) {
     this.malletMesh.updateWorldMatrix(true, false)
@@ -324,6 +362,22 @@ export class Lamb {
 
     this.group.position.set(player.x, player.y, player.z)
     this.group.rotation.y = player.facing
+
+    // --- blink ----------------------------------------------------------------
+    this.blinkTimer -= dt
+    if (this.blinkTimer <= 0 && this.blinkProgress <= 0) {
+      this.blinkProgress = 1
+      this.blinkTimer = 2.4 + Math.random() * 4
+    }
+    if (this.blinkProgress > 0) {
+      // 0 -> 1 -> 0 over about a seventh of a second.
+      this.blinkProgress = Math.max(0, this.blinkProgress - dt / 0.11)
+      const closed = Math.sin(clamp01(1 - this.blinkProgress) * Math.PI)
+      this.eyelids.visible = closed > 0.03
+      this.eyelids.scale.set(1, Math.max(0.02, closed), 1)
+    } else {
+      this.eyelids.visible = false
+    }
 
     // --- gait -----------------------------------------------------------------
     const gaitPhase = (player.gait / STRIDE_LENGTH) * Math.PI * 2
@@ -378,6 +432,19 @@ export class Lamb {
     // --- tail ------------------------------------------------------------------
     this.tail.rotation.y = Math.sin(time * (5 + speed01 * 7)) * (0.22 + speed01 * 0.2)
     this.tail.rotation.x = 0.3 + Math.sin(time * 3) * 0.06
+
+    // --- cheer ------------------------------------------------------------------
+    if (this.cheerTimer > 0) {
+      this.cheerTimer = Math.max(0, this.cheerTimer - dt)
+      const t = 1 - this.cheerTimer / 0.75
+      // Two quick hops with a squash on each landing.
+      const hop = Math.abs(Math.sin(t * Math.PI * 2)) * (1 - t) * 0.34
+      this.body.position.y += hop
+      this.bodyMesh.scale.y *= 1 - Math.cos(t * Math.PI * 4) * 0.06
+      this.headPivot.rotation.x -= 0.22 * (1 - t)
+      // Ears fly up with the hop.
+      this.earAngle -= hop * 0.9
+    }
 
     // --- swing -----------------------------------------------------------------
     if (player.swingTimer > 0) {

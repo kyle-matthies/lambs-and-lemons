@@ -642,6 +642,8 @@ export class ValleyRenderer {
         }
 
         case 'critterServed': {
+          this.lamb.cheer()
+          this.followCamera.punch(0.14, 0.55)
           this.floaters?.spawn(
             event.x,
             event.y + 1.2,
@@ -689,6 +691,8 @@ export class ValleyRenderer {
         }
 
         case 'valleyWoke': {
+          this.lamb.cheer(1.6)
+          this.followCamera.punch(0.24, 1.1)
           this.floaters?.spawn(event.x, event.y + 2.6, event.z, 'THE VALLEY WOKE UP!', 'triumph')
           // Everything at once: the whole meadow floods with colour.
           this.bloomMap.flood(this.renderer)

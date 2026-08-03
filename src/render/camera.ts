@@ -50,6 +50,9 @@ export class FollowCamera {
   private framing = LANDSCAPE
   private boom = 1
   private shakeScale = 1
+  private punchAmount = 0
+  private punchTime = 0
+  private punchDuration = 1
 
   constructor() {
     this.camera.position.set(0, 12, 16)
@@ -68,6 +71,16 @@ export class FollowCamera {
     this.camera.aspect = aspect
     this.camera.fov = this.framing.fov
     this.camera.updateProjectionMatrix()
+  }
+
+  /**
+   * Ease the rig in for a beat. Used when something worth looking at happens —
+   * the camera leaning in and settling back reads as the game noticing too.
+   */
+  punch(amount: number, duration: number) {
+    this.punchAmount = amount
+    this.punchTime = duration
+    this.punchDuration = duration
   }
 
   /** Scales every subsequent shake. 0 disables them for reduced-motion users. */
@@ -104,9 +117,11 @@ export class FollowCamera {
     const speed = Math.hypot(vx, vz) || 1
     this.lookTarget.set(x + (vx / speed) * lead, y + 1.15, z + (vz / speed) * lead)
 
-    // The rig eases back a touch at speed, which reads as exhilaration.
-    const boomTarget = 1 + speed01 * 0.13
-    this.boom = boomTarget
+    // The rig eases back a touch at speed, which reads as exhilaration, and
+    // leans in for a beat after something worth noticing.
+    const punch =
+      this.punchTime > 0 ? this.punchAmount * Math.sin((this.punchTime / this.punchDuration) * Math.PI) : 0
+    this.boom = 1 + speed01 * 0.13 - punch
     this.offset.set(0, this.framing.height * this.boom, this.framing.distance * this.boom)
     this.desired.copy(this.lookTarget).add(this.offset)
   }
@@ -140,6 +155,7 @@ export class FollowCamera {
     this.camera.lookAt(this.target)
     this.camera.rotateX(HORIZON_TILT)
 
+    if (this.punchTime > 0) this.punchTime = Math.max(0, this.punchTime - dt)
     this.applyShake(dt)
   }
 
