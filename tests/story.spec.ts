@@ -56,6 +56,15 @@ test('each chapter is its own place', async ({ page }) => {
   await expect(checklist).toContainText('0/5')
 })
 
+test('a finished chapter says only what actually happened', async ({ page }) => {
+  // Chapters 2-4 ask for some of their creatures, not all, so the ending card
+  // must not claim everyone got a cup. `?over=woke` frees the lot, which is the
+  // one case where it may.
+  await page.goto('/?chapter=2&over=woke')
+  await expect(page.getByText(/THE POND HOLLOW IS AWAKE/i)).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(/Everyone here has had a cup/i)).toBeVisible()
+})
+
 test('objectives tick over as the simulation runs', async ({ page }) => {
   await page.goto('/?chapter=1')
   const checklist = page.getByRole('list', { name: /What to do here/i })

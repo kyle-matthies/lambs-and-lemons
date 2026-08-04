@@ -332,24 +332,33 @@ export function GameCanvas({
         }
 
         if (state.phase === 'ended' && lastPhaseRef.current !== 'ended') {
-          const { best, isNewBest: newBest } = recordBestRound(
-            bestRef.current,
-            state.roundMinutes,
-            state.inventory.sold,
-            state.inventory.score,
-          )
-          bestRef.current = best
-          setBestByRound(best)
-          setIsNewBest(newBest)
-          setLeaderboard(
-            recordLeaderboard({
-              sold: state.inventory.sold,
-              score: state.inventory.score,
-              minutes: state.roundMinutes,
-              sparkleCups: state.stats.sparkleCups,
-              at: Date.now(),
-            }),
-          )
+          // Only a timed round has a time to be best at. A chapter ends in the
+          // same `ended` phase but carries the default two-minute setting it
+          // never used, so recording it here would overwrite the player's real
+          // two-minute Smash best with an untimed journey result and file it on
+          // the leaderboard as though it had been raced.
+          let newBest = false
+          if (state.mode === 'arcade') {
+            const recorded = recordBestRound(
+              bestRef.current,
+              state.roundMinutes,
+              state.inventory.sold,
+              state.inventory.score,
+            )
+            newBest = recorded.isNewBest
+            bestRef.current = recorded.best
+            setBestByRound(recorded.best)
+            setIsNewBest(newBest)
+            setLeaderboard(
+              recordLeaderboard({
+                sold: state.inventory.sold,
+                score: state.inventory.score,
+                minutes: state.roundMinutes,
+                sparkleCups: state.stats.sparkleCups,
+                at: Date.now(),
+              }),
+            )
+          }
           soundRef.current.play(newBest ? 'cheer' : 'fanfare')
           inputRef.current = EMPTY_INPUT
           joystickActiveRef.current = false

@@ -181,6 +181,7 @@ for (const minutes of runArcade ? lengths : []) {
 
     // Correctness, not taste: the loop must be completable and self-consistent.
     check(state.phase === 'ended', `${minutes}min/${seed}: round never ended`)
+    check(state.mode === 'arcade', `${minutes}min/${seed}: timed round did not run in arcade mode`)
     check(state.stats.crittersFreed > 0, `${minutes}min/${seed}: nobody was served`)
     check(
       state.inventory.cups >= 0 && state.inventory.sparkleCups >= 0,
@@ -254,6 +255,11 @@ if (runCampaign) {
         state.critters.length === chapter.critters,
         `${chapter.id}: spawned ${state.critters.length} creatures, recipe asks for ${chapter.critters}`,
       )
+      // The UI decides whether to write the arcade record books off this flag,
+      // and a chapter carries the default two-minute setting it never used — so
+      // if this ever came back 'arcade', the journey would start overwriting the
+      // player's Smash best.
+      check(state.mode === 'story', `${chapter.id}: chapter did not run in story mode`)
     }
 
     // Tuning signal rather than a pass/fail: the ridge is meant to be the long one.

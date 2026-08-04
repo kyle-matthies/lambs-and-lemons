@@ -100,6 +100,13 @@ const OCCLUSION_RADIUS = 2.4
 /** How far away someone can be and still catch Lammy's eye. */
 const LOOK_RANGE = 16
 
+/**
+ * How low the sun gets by the end of a chapter. Short of 1 on purpose: a full
+ * dusk is the timed round's "you ran out of light", and a chapter should finish
+ * warm and gold rather than on the failure state's palette.
+ */
+const STORY_DUSK_PEAK = 0.82
+
 export interface ValleyRendererOptions {
   tier?: QualityTier
   /** Stand decorations bought in the tycoon shop. */
@@ -804,15 +811,22 @@ export class ValleyRenderer {
     // therefore arrives at golden hour exactly as you finish it, because
     // finishing is what makes the sun go down.
     const total = Math.max(1, state.roundMinutes * 60)
-    const progress =
-      state.mode === 'story'
-        ? objectiveFraction(state)
-        : clamp01(1 - state.timeLeft / total)
+    const story = state.mode === 'story'
+    const progress = story ? objectiveFraction(state) : clamp01(1 - state.timeLeft / total)
     const elapsed = state.phase === 'ready' ? 0 : progress
-    const duskTarget = state.outcome === 'valleyWoke' ? 0 : elapsed
+    // Waking the valley climbs the sun back up — but only in the timed round,
+    // where the clock running out is the failure and the sunrise is the reward
+    // for beating it. A chapter *ends* by completing, so sending dusk to zero
+    // there would snap the light back to midday on the very frame the ending
+    // card appears, undoing the arrival it was built toward.
+    const duskTarget = story
+      ? elapsed * STORY_DUSK_PEAK
+      : state.outcome === 'valleyWoke'
+        ? 0
+        : elapsed
     this.dusk =
       this.duskOverride ??
-      damp(this.dusk, duskTarget, state.outcome === 'valleyWoke' ? 0.9 : 6, dt)
+      damp(this.dusk, duskTarget, !story && state.outcome === 'valleyWoke' ? 0.9 : 6, dt)
     this.applyDaylight()
     this.uniforms.uTime.value = this.time
     this.uniforms.uPlayerPos.value.set(state.player.x, state.player.y, state.player.z)

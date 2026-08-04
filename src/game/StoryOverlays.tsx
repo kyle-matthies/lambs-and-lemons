@@ -66,15 +66,23 @@ export function ChapterOverlay({
   onHome: () => void
 }) {
   const bloomPercent = Math.round(snapshot.bloomCoverage * 100)
+  // Most chapters ask for some of their creatures, not all of them — finish the
+  // bloom or the trees first and you can leave with someone still waiting. The
+  // card has to say what actually happened, or the frozen scene behind it
+  // contradicts the words on top of it.
+  const everyoneServed = snapshot.lostCritters === 0
 
   return (
     <div className="game-overlay">
       <div className="end-panel triumphant">
         <h2 className="new-best">{chapter.title.toUpperCase()} IS AWAKE!</h2>
         <p className="end-blurb">
+          {everyoneServed
+            ? 'Everyone here has had a cup. '
+            : `${chapter.title} has its colour back. `}
           {next
-            ? `Everyone here has had a cup. ${next.blurb}`
-            : 'Every corner of the valley has its colour back. You walked the whole way.'}
+            ? next.blurb
+            : 'Every corner of the valley is awake now. You walked the whole way.'}
         </p>
 
         <div className="stat-rows">
