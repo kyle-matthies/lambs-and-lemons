@@ -67,6 +67,15 @@ export const CRITTER_KINDS = ['lamb', 'bunny', 'piglet'] as const
 export const CRITTER_SPEED_LOST = 1.05
 export const CRITTER_SPEED_FOLLOW = 8.4
 export const CRITTER_WANDER_RADIUS = 3.4
+/**
+ * How close Lammy has to be, carrying a cup, before a lost creature gets up and
+ * comes to meet her — and how fast it hurries when it does.
+ *
+ * Kept short and slow on purpose. It should feel like being noticed, not like
+ * the animals are chasing the player down and serving themselves.
+ */
+export const CRITTER_HOPE_RANGE = 6.5
+export const CRITTER_SPEED_HOPE = 1.9
 /** Spacing between animals in the line trailing Lammy. */
 export const CRITTER_FOLLOW_GAP = 1.35
 /** How long the colour takes to flood back through a served critter. */

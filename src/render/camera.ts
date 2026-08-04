@@ -21,8 +21,8 @@ interface Shake {
 
 // ~33° above the horizon in landscape, a little steeper on a phone so the play
 // area still fits. Low enough that the hills, the sky and the trees read as 3D.
-const LANDSCAPE = { distance: 12.0, height: 4.1, fov: 42, lookAhead: 3.2 }
-const PORTRAIT = { distance: 11.5, height: 5.6, fov: 52, lookAhead: 4.2 }
+const LANDSCAPE = { distance: 10.4, height: 3.7, fov: 42, lookAhead: 3.2 }
+const PORTRAIT = { distance: 10.2, height: 5.1, fov: 52, lookAhead: 4.2 }
 
 /**
  * Extra upward tilt applied after the look-at, in radians.

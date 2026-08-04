@@ -16,7 +16,8 @@ import {
   type BufferGeometry,
   type Texture,
 } from 'three'
-import { clamp01, damp, easeOutBack, smoothstep } from '../core/math'
+import { clamp01, damp, distance2D, easeOutBack, smoothstep } from '../core/math'
+import { nearestLostCritter } from '../game/critters'
 import {
   MAX_GROUND_LEAVES,
   MAX_GROUND_LEMONS,
@@ -27,7 +28,7 @@ import {
 } from '../game/constants'
 import type { GameEvent, GameState } from '../game/types'
 import type { DecorationId } from '../lib/storage'
-import { BLOOM_AREA, BLOOM_ORIGIN } from '../game/bloom'
+import { BLOOM_AREA, BLOOM_ORIGIN, sampleBloom } from '../game/bloom'
 import { objectiveFraction } from '../game/objectives'
 import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
@@ -47,6 +48,8 @@ import {
 import { createGrass } from './grass'
 import { Horizon } from './horizon'
 import { Lamb } from './lamb'
+import { Birds } from './birds'
+import { Butterflies } from './butterflies'
 import { Motes } from './motes'
 import { PALETTE, SOUR_TINT } from './palette'
 import { PostPipeline } from './postfx'
@@ -94,6 +97,9 @@ interface TreeVisual {
 /** Radius around the camera→player line inside which a tree dissolves. */
 const OCCLUSION_RADIUS = 2.4
 
+/** How far away someone can be and still catch Lammy's eye. */
+const LOOK_RANGE = 16
+
 export interface ValleyRendererOptions {
   tier?: QualityTier
   /** Stand decorations bought in the tycoon shop. */
@@ -139,6 +145,8 @@ export class ValleyRenderer {
   private readonly swingTrail = new SwingTrail()
   private readonly floaters: Floaters | null
   private readonly motes: Motes
+  private readonly butterflies: Butterflies
+  private readonly birds: Birds
   private readonly lamb: Lamb
   private critterHerd: CritterHerd | null = null
   private lambShadow: Mesh
@@ -248,8 +256,13 @@ export class ValleyRenderer {
     this.scene.add(this.worldGroup)
     this.particles = new ParticleField(this.settings.maxParticles)
     this.motes = new Motes({ count: this.settings.motes, radius: 22 }, this.alphaTexture)
+    this.butterflies = new Butterflies(
+      { count: this.settings.butterflies, radius: state.world.playRadius },
+      state.world.seed,
+    )
+    this.birds = new Birds({ count: this.settings.birds }, state.world.seed)
     this.lamb = new Lamb(this.uniforms, this.detailTexture)
-    this.lamb.group.scale.setScalar(1.22)
+    this.lamb.group.scale.setScalar(1.3)
     this.lambShadow = createBlobShadow(this.alphaTexture, 1.5)
     this.lemonField = new ItemField({ capacity: MAX_GROUND_LEMONS + 40, kind: 'lemon' }, this.uniforms)
     this.leafField = new ItemField({ capacity: MAX_GROUND_LEAVES + 30, kind: 'leaf' }, this.uniforms)
@@ -261,6 +274,8 @@ export class ValleyRenderer {
     this.scene.add(this.zestRings.group)
     this.scene.add(this.swingTrail.mesh)
     this.scene.add(this.motes.mesh)
+    this.scene.add(this.butterflies.mesh)
+    this.scene.add(this.birds.mesh)
 
     // Respect the OS motion preference: no camera shake, gentler screen flashes.
     this.calmMotion = prefersReducedMotion()
@@ -269,6 +284,11 @@ export class ValleyRenderer {
     this.followCamera.reset(state.player.x, state.player.y, state.player.z, state.world)
     this.seedInitialBloom(state)
     this.warmUpShaders()
+    // A handle on the live renderer, for poking at the scene graph from the dev
+    // console while tuning. Never shipped.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __valley?: unknown }).__valley = this
+    }
   }
 
   /**
@@ -409,7 +429,12 @@ export class ValleyRenderer {
     this.worldGroup.add(this.lamb.group)
     this.worldGroup.add(this.lambShadow)
 
-    this.critterHerd = new CritterHerd(state.critters, this.uniforms, this.detailTexture)
+    this.critterHerd = new CritterHerd(
+      state.critters,
+      this.uniforms,
+      this.detailTexture,
+      this.alphaTexture,
+    )
     this.worldGroup.add(this.critterHerd.group)
   }
 
@@ -795,12 +820,17 @@ export class ValleyRenderer {
     this.uniforms.uWindStrength.value = 0.75 + Math.sin(this.time * 0.23) * 0.35
 
     // --- characters and props -------------------------------------------------
-    this.lamb.update(state.player, dt, this.time, state.inventory.cups)
+    // She watches whoever is still waiting, so long as they're close enough to
+    // plausibly have caught her eye.
+    const waiting = nearestLostCritter(state)
+    const noticed =
+      waiting && distance2D(waiting.x, waiting.z, state.player.x, state.player.z) < LOOK_RANGE
+        ? waiting
+        : null
+    this.lamb.update(state.player, dt, this.time, state.inventory.cups, noticed)
     this.lambShadow.position.set(state.player.x, state.player.y + 0.04, state.player.z)
     const shadowScale = 1 + clamp01(state.player.speed / PLAYER_SPEED) * 0.18
     this.lambShadow.scale.setScalar(shadowScale)
-
-    this.critterHerd?.update(state.critters, dt, this.time)
 
     // The trail is brightest through the strike and gone by the recovery.
     const swing = state.player.swingTimer
@@ -820,6 +850,27 @@ export class ValleyRenderer {
       this.time,
       this.daylight.duskGlow,
       this.uniforms.uWindStrength.value,
+    )
+    // Butterflies only exist where the colour has come back, so they repopulate
+    // the meadow as the round is won rather than being set dressing from frame one.
+    this.butterflies.update(
+      dt,
+      this.time,
+      state.player.x,
+      state.player.z,
+      this.healOverride === null
+        ? (x, z) => sampleBloom(state.bloomField, x, z)
+        : () => this.healOverride as number,
+      (x, z) => state.world.heightAt(x, z),
+    )
+
+    this.birds.update(
+      dt,
+      this.time,
+      this.healOverride ?? state.bloomCoverage,
+      state.player.x,
+      state.player.z,
+      (x, z) => state.world.heightAt(x, z),
     )
     this.zestRings.update(dt)
     this.water?.update(this.time, this.heal)
@@ -849,6 +900,14 @@ export class ValleyRenderer {
       )
     }
     this.followCamera.camera.updateMatrixWorld()
+
+    // After the camera: the want-bubbles billboard against it, so a stale
+    // quaternion here would leave them visibly lagging every time it swings.
+    this.critterHerd?.update(state.critters, dt, this.time, {
+      camera: this.followCamera.camera,
+      playerX: state.player.x,
+      playerZ: state.player.z,
+    })
 
     // The translucency term needs the sun in view space, so it has to be refreshed
     // after the camera has settled for this frame.
@@ -995,6 +1054,8 @@ export class ValleyRenderer {
     this.bloomMap.dispose()
     this.particles.dispose()
     this.motes.dispose()
+    this.butterflies.dispose()
+    this.birds.dispose()
     this.zestRings.dispose()
     this.swingTrail.dispose()
     this.floaters?.dispose()

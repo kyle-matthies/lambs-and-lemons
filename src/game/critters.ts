@@ -4,8 +4,10 @@ import {
   CRITTER_BLOOM_TIME,
   CRITTER_COUNT,
   CRITTER_FOLLOW_GAP,
+  CRITTER_HOPE_RANGE,
   CRITTER_KINDS,
   CRITTER_SPEED_FOLLOW,
+  CRITTER_SPEED_HOPE,
   CRITTER_SPEED_LOST,
   CRITTER_WANDER_RADIUS,
   FLOCK_TRAIL_INTERVAL,
@@ -134,6 +136,39 @@ export function updateCritters(state: GameState, dt: number) {
 }
 
 function updateLost(state: GameState, critter: Critter, dt: number) {
+  const player = state.player
+  const toPlayer = distance2D(critter.x, critter.z, player.x, player.z)
+
+  // Someone is coming, and she's carrying a cup. That's worth getting up for.
+  // They shuffle over and stop just short, which turns the serve from "walk onto
+  // a target" into two characters meeting each other halfway.
+  if (state.inventory.cups > 0 && toPlayer < CRITTER_HOPE_RANGE) {
+    const stop = SERVE_RADIUS * 0.8
+    if (toPlayer > stop) {
+      const t = (toPlayer - stop) / Math.max(0.001, CRITTER_HOPE_RANGE - stop)
+      moveToward(
+        state.world,
+        critter,
+        player.x,
+        player.z,
+        CRITTER_SPEED_HOPE * (1 - t * 0.45),
+        dt,
+        stop,
+      )
+    } else {
+      critter.speed = damp(critter.speed, 0, 8, dt)
+      critter.facing = dampAngle(
+        critter.facing,
+        Math.atan2(player.x - critter.x, player.z - critter.z),
+        6,
+        dt,
+      )
+    }
+    // Wander somewhere fresh once she's gone rather than snapping back to a stale target.
+    critter.wanderTimer = 0
+    return
+  }
+
   critter.wanderTimer -= dt
 
   if (critter.wanderTimer <= 0) {

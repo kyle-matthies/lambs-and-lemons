@@ -89,49 +89,69 @@ function buildBody(rng: Rng) {
   return merged
 }
 
+/**
+ * Head size, and the reason it is so big.
+ *
+ * Lammy is about forty pixels tall on a phone. At that size a realistic
+ * head-to-body ratio leaves a face too small to read, so she's drawn the way a
+ * picture book would draw her: an enormous round head, eyes a third of its
+ * width, and a body that's really just something for the head to sit on.
+ */
+const HEAD_RADIUS = 0.235
+const EYE_X = 0.108
+const EYE_Y = 0.04
+const EYE_Z = 0.2
+
 function buildHead(rng: Rng) {
   const parts: BufferGeometry[] = []
 
-  const skull = new SphereGeometry(0.2, 14, 11)
-  skull.scale(1, 1.02, 0.95)
+  const skull = new SphereGeometry(HEAD_RADIUS, 16, 12)
+  skull.scale(1, 1.0, 0.94)
   parts.push(paint(skull, PALETTE.skin))
 
-  // Woolly fringe across the brow.
-  for (let index = 0; index < 7; index += 1) {
-    const curl = new SphereGeometry(randRange(rng, 0.075, 0.105), 7, 6)
-    const angle = -0.5 + (index / 6) * 1.9
-    curl.translate(Math.cos(angle) * 0.16, 0.14 + Math.sin(angle) * 0.06, -0.02)
+  // Woolly fringe across the brow — the bit of wool that makes her a lamb and
+  // not a puppy.
+  for (let index = 0; index < 9; index += 1) {
+    const curl = new SphereGeometry(randRange(rng, 0.085, 0.115), 7, 6)
+    const angle = -0.6 + (index / 8) * 2.1
+    curl.translate(Math.cos(angle) * 0.185, 0.16 + Math.sin(angle) * 0.07, -0.02)
     parts.push(paint(curl, PALETTE.wool))
   }
+  // One curl flopping forward over the brow. Asymmetry reads as personality.
+  const forelock = new SphereGeometry(0.085, 8, 7)
+  forelock.scale(1, 0.9, 0.85)
+  forelock.translate(-0.075, 0.185, 0.11)
+  parts.push(paint(forelock, PALETTE.wool))
 
-  const muzzle = new SphereGeometry(0.115, 10, 8)
-  muzzle.scale(1, 0.82, 1.05)
-  muzzle.translate(0, -0.06, 0.16)
-  parts.push(paint(muzzle, PALETTE.skin.clone().multiplyScalar(1.04)))
+  const muzzle = new SphereGeometry(0.135, 12, 9)
+  muzzle.scale(1, 0.78, 1.02)
+  muzzle.translate(0, -0.075, 0.185)
+  parts.push(paint(muzzle, PALETTE.skin.clone().multiplyScalar(1.05)))
 
-  const nose = new SphereGeometry(0.032, 7, 6)
-  nose.scale(1.3, 0.8, 1)
-  nose.translate(0, -0.035, 0.27)
+  const nose = new SphereGeometry(0.038, 8, 6)
+  nose.scale(1.35, 0.85, 1)
+  nose.translate(0, -0.045, 0.305)
   parts.push(paint(nose, new Color('#d98a86')))
 
   // Big storybook eyes: dark iris plus two offset catchlights.
   for (const side of [-1, 1]) {
-    const eye = new SphereGeometry(0.055, 10, 8)
-    eye.translate(side * 0.095, 0.035, 0.165)
+    const eye = new SphereGeometry(0.072, 12, 10)
+    eye.scale(1, 1.06, 1)
+    eye.translate(side * EYE_X, EYE_Y, EYE_Z)
     parts.push(paint(eye, new Color('#2b2118')))
 
-    const glint = new SphereGeometry(0.021, 7, 6)
-    glint.translate(side * 0.079, 0.062, 0.203)
+    const glint = new SphereGeometry(0.028, 8, 7)
+    glint.translate(side * 0.088, 0.074, 0.246)
     parts.push(paint(glint, new Color('#ffffff')))
 
-    const glintSmall = new SphereGeometry(0.011, 6, 5)
-    glintSmall.translate(side * 0.117, 0.012, 0.198)
+    const glintSmall = new SphereGeometry(0.015, 6, 5)
+    glintSmall.translate(side * 0.137, 0.008, 0.238)
     parts.push(paint(glintSmall, new Color('#ffffff')))
 
-    const cheek = new SphereGeometry(0.04, 7, 6)
-    cheek.scale(1.3, 0.75, 0.5)
-    cheek.translate(side * 0.14, -0.035, 0.145)
-    parts.push(paint(cheek, new Color('#ffb9ae')))
+    const cheek = new SphereGeometry(0.055, 8, 6)
+    cheek.scale(1.35, 0.72, 0.45)
+    cheek.translate(side * 0.165, -0.05, 0.175)
+    parts.push(paint(cheek, new Color('#ffb0a4')))
   }
 
   const merged = mergeGeometries(parts, false)
@@ -151,22 +171,163 @@ function buildEyelids() {
   for (const side of [-1, 1]) {
     // Comfortably larger than the eye and sitting proud of it, so a closed lid
     // never leaves a sliver of iris showing through.
-    const lid = new SphereGeometry(0.072, 10, 8)
+    const lid = new SphereGeometry(0.09, 10, 8)
     lid.scale(1, 1, 0.7)
-    lid.translate(side * 0.095, 0.038, 0.178)
-    parts.push(paint(lid, PALETTE.skin.clone().multiplyScalar(1.02)))
+    lid.translate(side * EYE_X, EYE_Y + 0.004, EYE_Z + 0.014)
+    parts.push(paint(lid, PALETTE.skin.clone().multiplyScalar(1.03)))
   }
   const merged = mergeGeometries(parts, false)
   merged.computeBoundingSphere()
   return merged
 }
 
+/**
+ * The mouth: a dark rounded shape with a tongue behind it.
+ *
+ * Kept off the merged head so its scale can be driven per frame. Squashed flat
+ * it's a closed smile; stretched open it's a delighted "aaah". One mesh doing
+ * both jobs is why she can react to things at all.
+ */
+function buildMouth() {
+  const parts: BufferGeometry[] = []
+
+  const mouth = new SphereGeometry(0.068, 12, 9)
+  mouth.scale(1.4, 1, 0.85)
+  parts.push(paint(mouth, new Color('#6d3730')))
+
+  const tongue = new SphereGeometry(0.042, 8, 6)
+  tongue.scale(1.2, 0.8, 0.7)
+  tongue.translate(0, -0.024, 0.03)
+  parts.push(paint(tongue, new Color('#f08d92')))
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
+/**
+ * One eyebrow, pivoting at its inner end so it can angle as well as lift.
+ *
+ * Dark and thick on purpose. A subtle brow on a face this small is a brow that
+ * isn't there, and the brows are doing most of the work of "determined".
+ */
+function buildBrow() {
+  const brow = new SphereGeometry(0.036, 8, 6)
+  brow.scale(2, 0.55, 0.75)
+  brow.translate(0.055, 0, 0)
+  return paint(brow, new Color('#9a6247'))
+}
+
+/** Where the mouth sits at rest, on the front of the muzzle rather than in it. */
+const MOUTH_REST_Y = -0.15
+const MOUTH_REST_Z = 0.3
+
 function buildEar() {
-  const ear = new SphereGeometry(0.09, 9, 7)
-  ear.scale(1.55, 0.42, 0.85)
+  const parts: BufferGeometry[] = []
+  const ear = new SphereGeometry(0.105, 10, 8)
+  ear.scale(1.6, 0.42, 0.9)
   // Pivot at the base so rotation reads as a flop, not a spin.
-  ear.translate(0.13, 0, 0)
-  return paint(ear, PALETTE.skin.clone().multiplyScalar(0.97))
+  ear.translate(0.15, 0, 0)
+  parts.push(paint(ear, PALETTE.skin.clone().multiplyScalar(0.97)))
+
+  const inner = new SphereGeometry(0.085, 8, 7)
+  inner.scale(1.5, 0.3, 0.7)
+  inner.translate(0.15, 0.02, 0.02)
+  parts.push(paint(inner, new Color('#f7b7ab')))
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
+/**
+ * A ribbon bow, tied between her ears.
+ *
+ * Chosen for where the camera is. The chase rig spends the whole round looking
+ * at the back of her head, so an accessory on her chest would never be seen —
+ * this one is in frame every second of play, and it's the fastest way to make a
+ * white blob read as a specific little girl.
+ */
+function buildBow() {
+  const parts: BufferGeometry[] = []
+  const ribbon = PALETTE.standCloth
+  const ribbonDark = PALETTE.standCloth.clone().multiplyScalar(0.78)
+
+  for (const side of [-1, 1]) {
+    const loop = new SphereGeometry(0.1, 10, 8)
+    loop.scale(1.3, 0.9, 0.55)
+    loop.translate(side * 0.115, 0, 0)
+    loop.rotateZ(side * 0.32)
+    parts.push(paint(loop, ribbon))
+
+    const tail = new SphereGeometry(0.055, 7, 6)
+    tail.scale(0.85, 1.5, 0.45)
+    tail.translate(side * 0.07, -0.115, -0.01)
+    tail.rotateZ(side * 0.5)
+    parts.push(paint(tail, ribbonDark))
+  }
+
+  const knot = new SphereGeometry(0.06, 9, 7)
+  knot.scale(1, 0.95, 0.9)
+  parts.push(paint(knot, ribbonDark))
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
+/** A little brass bell on a ribbon under her chin. Pivots so it can swing. */
+function buildBell() {
+  const parts: BufferGeometry[] = []
+  const body = new SphereGeometry(0.055, 10, 8)
+  body.scale(1, 0.92, 1)
+  body.translate(0, -0.055, 0)
+  parts.push(paint(body, new Color('#f5c53c')))
+
+  const loop = new SphereGeometry(0.022, 6, 5)
+  loop.translate(0, -0.008, 0)
+  parts.push(paint(loop, new Color('#c99a24')))
+
+  const slot = new SphereGeometry(0.03, 6, 5)
+  slot.scale(1.4, 0.28, 1)
+  slot.translate(0, -0.078, 0.036)
+  parts.push(paint(slot, new Color('#8a6a1a')))
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
+}
+
+/**
+ * The foreleg that holds the mallet.
+ *
+ * Without it the mallet floats beside her shoulder like a cursor, which is the
+ * single most doll-like thing about the old rig. Built in the arm pivot's space,
+ * with the pivot itself sitting proud of the wool so the hoof is actually seen
+ * closing around the grip rather than buried in a puff.
+ */
+function buildMalletArm() {
+  const parts: BufferGeometry[] = []
+
+  // Shoulder to wrist, angled back into the fleece.
+  const upper = new CylinderGeometry(0.058, 0.05, 0.22, 8, 1)
+  upper.rotateZ(-0.5)
+  upper.rotateX(0.2)
+  upper.translate(-0.07, 0.02, -0.03)
+  parts.push(paint(upper, PALETTE.wool))
+
+  const cuff = new SphereGeometry(0.062, 9, 7)
+  cuff.translate(0.005, -0.055, 0.015)
+  parts.push(paint(cuff, PALETTE.wool))
+
+  const hoof = new SphereGeometry(0.058, 9, 7)
+  hoof.scale(1.05, 0.95, 1.1)
+  hoof.translate(0.005, -0.1, 0.02)
+  parts.push(paint(hoof, PALETTE.hoof))
+
+  const merged = mergeGeometries(parts, false)
+  merged.computeBoundingSphere()
+  return merged
 }
 
 function buildLeg() {
@@ -184,13 +345,32 @@ function buildLeg() {
   return merged
 }
 
+/**
+ * The tail, sized for the camera behind her.
+ *
+ * The chase rig looks at her back for the whole round, so the pom-pom is the
+ * one moving thing reliably in frame. It's deliberately oversized and pushed
+ * clear of the fleece — a tail tucked into the wool might as well not exist.
+ */
 function buildTail(rng: Rng) {
   const parts: BufferGeometry[] = []
-  for (let index = 0; index < 3; index += 1) {
-    const puff = new SphereGeometry(randRange(rng, 0.055, 0.075), 7, 6)
-    puff.translate(0, -index * 0.045, -index * 0.02)
+
+  const core = new SphereGeometry(0.13, 10, 8)
+  parts.push(paint(core, PALETTE.woolShade))
+
+  for (let index = 0; index < 7; index += 1) {
+    const puff = new SphereGeometry(randRange(rng, 0.065, 0.095), 7, 6)
+    const angle = (index / 7) * Math.PI * 2
+    puff.translate(Math.cos(angle) * 0.085, Math.sin(angle) * 0.085, -0.03)
     parts.push(paint(puff, PALETTE.wool))
   }
+
+  // A ribbon to match the bow, so the two accessories read as one outfit.
+  const ribbon = new SphereGeometry(0.05, 8, 6)
+  ribbon.scale(1.4, 0.8, 0.9)
+  ribbon.translate(0, 0.11, 0.06)
+  parts.push(paint(ribbon, PALETTE.standCloth))
+
   const merged = mergeGeometries(parts, false)
   merged.computeBoundingSphere()
   return merged
@@ -270,6 +450,67 @@ function swingAngle(t: number) {
   return lerp(1.62, 0, smoothstep(0, 1, (t - 0.46) / 0.54))
 }
 
+/**
+ * What her face is doing, and what each one looks like.
+ *
+ * `mouth` is a scale applied to the mouth mesh — flat and wide is a closed
+ * smile, tall and round is an open one. Everything else is an offset, so the
+ * whole set can simply be damped toward the current target each frame and the
+ * transitions come out smooth for free.
+ */
+interface Expression {
+  mouthWidth: number
+  mouthOpen: number
+  mouthDrop: number
+  browLift: number
+  browAngle: number
+  /** Extra head pitch — chin up when delighted, tucked when winding up. */
+  headTilt: number
+}
+
+const EXPRESSIONS: Record<'calm' | 'eager' | 'happy' | 'determined' | 'joy', Expression> = {
+  calm: { mouthWidth: 1, mouthOpen: 0.4, mouthDrop: 0, browLift: 0, browAngle: 0.06, headTilt: 0 },
+  // Carrying a full tray and looking for someone to give it to.
+  eager: {
+    mouthWidth: 1.06,
+    mouthOpen: 0.66,
+    mouthDrop: -0.004,
+    browLift: 0.026,
+    browAngle: 0.18,
+    headTilt: -0.06,
+  },
+  happy: {
+    mouthWidth: 1.15,
+    mouthOpen: 0.82,
+    mouthDrop: -0.006,
+    browLift: 0.018,
+    browAngle: 0.14,
+    headTilt: -0.03,
+  },
+  determined: {
+    mouthWidth: 0.78,
+    mouthOpen: 0.34,
+    mouthDrop: -0.004,
+    browLift: -0.016,
+    browAngle: -0.42,
+    headTilt: 0.05,
+  },
+  joy: {
+    mouthWidth: 1.12,
+    mouthOpen: 1.5,
+    mouthDrop: -0.022,
+    browLift: 0.038,
+    browAngle: 0.22,
+    headTilt: -0.14,
+  },
+}
+
+/** How long she has to stand still before she starts finding things to do. */
+const IDLE_THRESHOLD = 2.2
+
+/** Resting head pitch. Negative tips her chin up toward the overhead camera. */
+const HEAD_PITCH = -0.16
+
 export class Lamb {
   readonly group = new Group()
 
@@ -277,6 +518,9 @@ export class Lamb {
   private readonly bodyMesh: Mesh
   private readonly headPivot = new Group()
   private readonly eyelids: Mesh
+  private readonly mouth: Mesh
+  private readonly brows: Object3D[] = []
+  private readonly bellPivot = new Group()
   private readonly ears: Object3D[] = []
   private readonly legs: LegRig[] = []
   private readonly tail: Mesh
@@ -293,6 +537,12 @@ export class Lamb {
   private earAngle = 0
   private earVelocity = 0
   private bounceMemory = 0
+  private readonly face: Expression = { ...EXPRESSIONS.calm }
+  private lookYaw = 0
+  private idleTime = 0
+  private idleBeat = 0
+  private bellSwing = 0
+  private bellVelocity = 0
 
   constructor(uniforms: ValleyUniforms, detail: Texture) {
     const rng = mulberry32(0x1a3b)
@@ -306,8 +556,12 @@ export class Lamb {
     this.bodyMesh.position.y = BODY_HEIGHT
     this.body.add(this.bodyMesh)
 
-    // Head hangs off the front of the torso.
-    this.headPivot.position.set(0, BODY_HEIGHT + 0.19, 0.3)
+    // The head sits high and proud of the fleece rather than hanging off the
+    // front of it. The chase camera looks down at her back for the whole round,
+    // and with the head at shoulder height it is occluded by her own wool
+    // whenever she runs across or away from the lens — which is most of the
+    // time. Up here, her face is in frame from every heading.
+    this.headPivot.position.set(0, BODY_HEIGHT + 0.42, 0.27)
     this.body.add(this.headPivot)
 
     const headMesh = new Mesh(buildHead(rng), material)
@@ -318,12 +572,45 @@ export class Lamb {
     this.eyelids.visible = false
     this.headPivot.add(this.eyelids)
 
+    this.mouth = new Mesh(buildMouth(), material)
+    this.mouth.position.set(0, MOUTH_REST_Y, MOUTH_REST_Z)
+    this.headPivot.add(this.mouth)
+
+    const browGeometry = buildBrow()
+    for (const side of [-1, 1]) {
+      const pivot = new Group()
+      pivot.position.set(0, 0.118, 0.222)
+      // Mirrored by a half turn rather than a negative scale, which would flip
+      // the winding and light the brow from the inside.
+      if (side < 0) pivot.rotation.y = Math.PI
+      const mesh = new Mesh(browGeometry, material)
+      pivot.add(mesh)
+      this.headPivot.add(pivot)
+      this.brows.push(pivot)
+    }
+
+    // Worn to one side rather than centred: a bow on the crown disappears into
+    // the fringe from behind, and a jaunty one gives her a "good" side.
+    const bow = new Mesh(buildBow(), material)
+    bow.castShadow = true
+    bow.position.set(-0.16, 0.205, 0.02)
+    bow.rotation.set(0.15, -0.45, 0.6)
+    this.headPivot.add(bow)
+
+    // Bell on a ribbon under the chin, on its own pivot so it can swing.
+    this.bellPivot.position.set(0, -0.135, 0.11)
+    this.headPivot.add(this.bellPivot)
+    const bell = new Mesh(buildBell(), material)
+    bell.castShadow = true
+    this.bellPivot.add(bell)
+
     const earGeometry = buildEar()
     for (const side of [-1, 1]) {
       const pivot = new Group()
-      pivot.position.set(side * 0.16, 0.045, 0.03)
-      pivot.rotation.z = side * 0.25
-      pivot.scale.x = side
+      pivot.position.set(side * 0.185, 0.055, 0.02)
+      pivot.userData.baseYaw = side < 0 ? Math.PI : 0
+      pivot.rotation.y = pivot.userData.baseYaw
+      pivot.rotation.z = 0.25
       const mesh = new Mesh(earGeometry, material)
       mesh.castShadow = true
       pivot.add(mesh)
@@ -351,7 +638,7 @@ export class Lamb {
 
     this.tail = new Mesh(buildTail(rng), material)
     this.tail.castShadow = true
-    this.tail.position.set(0, BODY_HEIGHT + 0.14, -0.42)
+    this.tail.position.set(0, BODY_HEIGHT + 0.16, -0.6)
     this.body.add(this.tail)
 
     // A tray of cups rides on her back, between the shoulders.
@@ -378,14 +665,21 @@ export class Lamb {
       this.cups.push(cup)
     }
 
-    // The mallet rides on a shoulder pivot on her right side.
-    this.armPivot.position.set(0.3, BODY_HEIGHT + 0.16, 0.06)
+    // The mallet rides on a shoulder pivot on her right side, with a foreleg
+    // wrapped around the grip so it reads as carried rather than orbiting.
+    // Far enough out that the hoof clears the wool puffs — inside them, the arm
+    // is invisible and the mallet goes back to looking like it is floating.
+    this.armPivot.position.set(0.42, BODY_HEIGHT + 0.16, 0.1)
     this.body.add(this.armPivot)
+
+    const arm = new Mesh(buildMalletArm(), material)
+    arm.castShadow = true
+    this.armPivot.add(arm)
 
     this.malletMesh = new Mesh(buildMallet(), material)
     this.malletMesh.castShadow = true
-    this.malletMesh.position.set(0.12, 0.46, 0.06)
-    this.malletMesh.rotation.z = -0.35
+    this.malletMesh.position.set(0.16, 0.42, -0.01)
+    this.malletMesh.rotation.z = -0.38
     this.armPivot.add(this.malletMesh)
   }
 
@@ -413,8 +707,16 @@ export class Lamb {
    */
   /**
    * @param carrying how many cups are on the tray, 0 to 3
+   * @param lookAt something in the world worth turning her head toward — the
+   *        nearest animal still waiting for a drink. Omit for no interest.
    */
-  update(player: Player, dt: number, time: number, carrying = 0) {
+  update(
+    player: Player,
+    dt: number,
+    time: number,
+    carrying = 0,
+    lookAt: { x: number; z: number } | null = null,
+  ) {
     const speed01 = clamp01(player.speed / PLAYER_SPEED)
 
     for (let index = 0; index < this.cups.length; index += 1) {
@@ -472,9 +774,52 @@ export class Lamb {
       leg.pivot.position.y = BODY_HEIGHT - 0.06 + Math.max(0, swing) * 0.03 * speed01
     }
 
+    // --- idle beats -------------------------------------------------------------
+    // Standing still is where a character either exists or doesn't. Once she's
+    // been stopped for a couple of seconds she starts doing things on her own:
+    // a look around, an ear flick, a bounce on the spot.
+    if (speed01 > 0.06 || player.swingTimer > 0) {
+      this.idleTime = 0
+      this.idleBeat = 0
+    } else {
+      this.idleTime += dt
+    }
+    const idling = this.idleTime > IDLE_THRESHOLD
+    let idleLook = 0
+    let idleHop = 0
+    if (idling) {
+      const beat = (this.idleTime - IDLE_THRESHOLD) % 5.4
+      this.idleBeat = beat
+      // Beat 0-1.6: glance left. 1.8-3.4: glance right. 4.0-4.6: a small hop.
+      if (beat < 1.6) idleLook = Math.sin((beat / 1.6) * Math.PI) * 0.55
+      else if (beat > 1.8 && beat < 3.4) idleLook = -Math.sin(((beat - 1.8) / 1.6) * Math.PI) * 0.5
+      else if (beat > 4.0 && beat < 4.6) {
+        const t = (beat - 4.0) / 0.6
+        idleHop = Math.sin(t * Math.PI) * 0.09
+      }
+    }
+    this.body.position.y += idleHop
+
     // --- head and ears ---------------------------------------------------------
-    this.headPivot.rotation.x = Math.sin(gaitPhase * 2 + 0.6) * 0.06 * speed01 - 0.05 * speed01
+    // Chin held up by default: the camera is above her, and a level head shows
+    // the player the top of a skull instead of a face.
+    this.headPivot.rotation.x =
+      HEAD_PITCH + Math.sin(gaitPhase * 2 + 0.6) * 0.06 * speed01 - 0.05 * speed01
     this.headPivot.rotation.z = -this.lean * 0.45
+
+    // She looks at whoever still needs her. Only a glance — the head turns
+    // within its own range and the body keeps facing where she's going, which is
+    // what makes it read as noticing rather than as steering.
+    let lookTarget = idleLook
+    if (lookAt) {
+      let delta = Math.atan2(lookAt.x - player.x, lookAt.z - player.z) - player.facing
+      while (delta > Math.PI) delta -= Math.PI * 2
+      while (delta < -Math.PI) delta += Math.PI * 2
+      // Fades out once she's running flat out; at speed she watches where she's going.
+      lookTarget = clamp(delta, -0.85, 0.85) * (1 - speed01 * 0.55)
+    }
+    this.lookYaw = damp(this.lookYaw, lookTarget, 5, dt)
+    this.headPivot.rotation.y = this.lookYaw
 
     // Ears run on a damped spring driven by vertical acceleration, so they flop a
     // beat behind every bounce and settle with a little overshoot.
@@ -487,15 +832,21 @@ export class Lamb {
     this.earAngle += this.earVelocity * dt
     this.earAngle = clamp(this.earAngle, -0.7, 0.7)
 
+    // A flick on a slow cycle, plus a deliberate one on the idle beat.
     const idleTwitch = Math.sin(time * 0.7) > 0.985 ? 0.35 : 0
+    const beatTwitch = idling && this.idleBeat > 3.5 && this.idleBeat < 3.9 ? 0.4 : 0
     this.ears.forEach((ear, index) => {
       const offset = index === 0 ? 0 : 0.35
-      ear.rotation.z = 0.25 + this.earAngle + Math.sin(time * 3.1 + offset) * 0.035 + idleTwitch
-      ear.rotation.y = Math.sin(time * 2.3 + offset) * 0.06
+      ear.rotation.z =
+        0.25 + this.earAngle + Math.sin(time * 3.1 + offset) * 0.035 + idleTwitch + beatTwitch
+      ear.rotation.y = (ear.userData.baseYaw as number) + Math.sin(time * 2.3 + offset) * 0.06
     })
 
     // --- tail ------------------------------------------------------------------
-    this.tail.rotation.y = Math.sin(time * (5 + speed01 * 7)) * (0.22 + speed01 * 0.2)
+    // Wags faster the more she's carrying — a full tray means someone is about
+    // to be very happy, and she knows it.
+    const excitement = speed01 + carrying * 0.22
+    this.tail.rotation.y = Math.sin(time * (5 + excitement * 7)) * (0.22 + excitement * 0.24)
     this.tail.rotation.x = 0.3 + Math.sin(time * 3) * 0.06
 
     // --- cheer ------------------------------------------------------------------
@@ -526,6 +877,61 @@ export class Lamb {
       // Idle: the mallet sways gently as she walks.
       this.armPivot.rotation.x += Math.sin(gaitPhase + 1.2) * 0.09 * speed01
     }
+
+    this.updateFace(player, dt, time, speed01, carrying)
+  }
+
+  /**
+   * Drive the mouth and brows from what she's doing.
+   *
+   * The state is read rather than pushed: nothing in the game has to remember to
+   * tell her to look pleased, which means the face can never get stuck on the
+   * wrong expression after an interrupted animation.
+   */
+  private updateFace(
+    player: Player,
+    dt: number,
+    time: number,
+    speed01: number,
+    carrying: number,
+  ) {
+    const target =
+      this.cheerTimer > 0
+        ? EXPRESSIONS.joy
+        : player.swingTimer > 0
+          ? EXPRESSIONS.determined
+          : speed01 > 0.25
+            ? EXPRESSIONS.happy
+            : carrying > 0
+              ? EXPRESSIONS.eager
+              : EXPRESSIONS.calm
+
+    // Joy snaps on and eases off; everything else eases both ways.
+    const rate = target === EXPRESSIONS.joy ? 18 : 9
+    this.face.mouthWidth = damp(this.face.mouthWidth, target.mouthWidth, rate, dt)
+    this.face.mouthOpen = damp(this.face.mouthOpen, target.mouthOpen, rate, dt)
+    this.face.mouthDrop = damp(this.face.mouthDrop, target.mouthDrop, rate, dt)
+    this.face.browLift = damp(this.face.browLift, target.browLift, rate, dt)
+    this.face.browAngle = damp(this.face.browAngle, target.browAngle, rate, dt)
+    this.face.headTilt = damp(this.face.headTilt, target.headTilt, rate, dt)
+
+    this.mouth.scale.set(this.face.mouthWidth, this.face.mouthOpen, 1)
+    // An open mouth grows downward from the lip, not out of the middle of it.
+    this.mouth.position.y = MOUTH_REST_Y + this.face.mouthDrop - (this.face.mouthOpen - 0.4) * 0.03
+    this.headPivot.rotation.x += this.face.headTilt
+
+    for (const brow of this.brows) {
+      brow.position.y = 0.118 + this.face.browLift
+      brow.rotation.z = this.face.browAngle
+    }
+
+    // The bell swings on a spring hung off her head pitch, so it lags the run
+    // cycle and keeps ringing for a moment after she stops.
+    const drive = this.headPivot.rotation.x * 2.4 + speed01 * Math.sin(time * 9) * 0.5
+    this.bellVelocity += (drive - this.bellSwing) * 90 * dt - this.bellVelocity * 11 * dt
+    this.bellSwing += this.bellVelocity * dt
+    this.bellPivot.rotation.x = clamp(this.bellSwing, -0.8, 0.8)
+    this.bellPivot.rotation.z = Math.sin(time * 4.2) * 0.06 * (0.3 + speed01)
   }
 
   dispose() {

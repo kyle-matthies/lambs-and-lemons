@@ -73,6 +73,19 @@ export function floodBloom(field: BloomField) {
   field.dirty = true
 }
 
+/**
+ * How much colour a single spot has back, 0-1.
+ *
+ * Nearest-cell rather than bilinear: at 1.5 m per cell nothing that asks this
+ * question — "should there be butterflies here yet?" — can tell the difference.
+ */
+export function sampleBloom(field: BloomField, x: number, z: number) {
+  const gx = Math.floor((x - BLOOM_ORIGIN) / CELL_SIZE)
+  const gz = Math.floor((z - BLOOM_ORIGIN) / CELL_SIZE)
+  if (gx < 0 || gz < 0 || gx >= RESOLUTION || gz >= RESOLUTION) return 0
+  return field.cells[gz * RESOLUTION + gx]
+}
+
 /** Fraction of the playable meadow that has colour again, 0-1. Cached. */
 export function bloomCoverage(field: BloomField, playRadius: number) {
   if (!field.dirty) return field.coverage
