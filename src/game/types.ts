@@ -4,8 +4,36 @@ import type { GroveLayout, World } from './world'
 export type GamePhase = 'ready' | 'playing' | 'ended'
 export type RoundMinutes = 1 | 2 | 3 | 4 | 5
 
+/**
+ * Arcade is the timed round: a clock, a score, a sunset you race. Story is the
+ * journey: no clock and no way to lose, ending when the chapter's work is done.
+ */
+export type GameMode = 'arcade' | 'story'
+
 /** How a round finished: ran out of light, or woke the whole valley. */
 export type RoundOutcome = 'sunset' | 'valleyWoke'
+
+/**
+ * What a chapter asks of you. Each one is answerable from state the simulation
+ * already keeps, so objectives cost no extra bookkeeping — see `objectives.ts`.
+ */
+export type Objective =
+  | { kind: 'freeAll' }
+  | { kind: 'freeCount'; count: number }
+  | { kind: 'bloom'; target: number }
+  | { kind: 'smash'; count: number }
+  | { kind: 'brew'; count: number }
+  | { kind: 'breakTrees'; count: number }
+
+/** One line of the checklist: an icon, what you have, and what you need. */
+export interface ObjectiveProgress {
+  icon: string
+  label: string
+  have: number
+  need: number
+  suffix: string
+  done: boolean
+}
 
 export type CritterKind = 'lamb' | 'bunny' | 'piglet'
 export type CritterState = 'lost' | 'blooming' | 'follower'
@@ -139,6 +167,7 @@ export interface RoundStats {
   lemonsCollected: number
   leavesCollected: number
   cupsSold: number
+  cupsBrewed: number
   sparkleCups: number
   crittersFreed: number
 }
@@ -147,7 +176,13 @@ export interface GameState {
   world: World
   layout: GroveLayout
   phase: GamePhase
+  mode: GameMode
+  /** Which chapter is being played, or null in arcade mode. */
+  chapterId: string | null
+  /** Empty in arcade mode, where the clock is the only thing being tracked. */
+  objectives: Objective[]
   roundMinutes: RoundMinutes
+  /** Counts down in arcade mode; in story mode it stays put and means nothing. */
   timeLeft: number
   /** Seconds since the round began — animation phases hang off this. */
   elapsed: number
@@ -177,6 +212,12 @@ export interface GameState {
 
 export interface GameSnapshot {
   phase: GamePhase
+  mode: GameMode
+  chapterId: string | null
+  /** The chapter checklist, already measured. Empty in arcade mode. */
+  objectives: ObjectiveProgress[]
+  /** How far through the chapter's work you are, 0-1. Drives the light. */
+  objectiveFraction: number
   roundMinutes: RoundMinutes
   timeLeft: number
   score: number

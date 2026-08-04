@@ -16,6 +16,8 @@ export function MenuScreen({
   onToggleMute,
   onPlayArcade,
   onPlayTycoon,
+  onPlayStory,
+  storyChapter,
 }: {
   bestCups: number
   purse: number
@@ -23,6 +25,9 @@ export function MenuScreen({
   onToggleMute: () => void
   onPlayArcade: () => void
   onPlayTycoon: () => void
+  onPlayStory: () => void
+  /** Title of the chapter waiting to be played, for the button's subtitle. */
+  storyChapter: string
 }) {
   const [showHowTo, setShowHowTo] = useState(false)
 
@@ -40,6 +45,13 @@ export function MenuScreen({
           <p className="menu-tagline">{GAME_TAGLINE}</p>
 
           <div className="mode-buttons">
+            {/* First, because it's the way in for a new player — the timed round
+                assumes you already know what a cup is for. */}
+            <button className="mode-button story" type="button" onClick={onPlayStory}>
+              <img src={assetPaths.lambIdle} alt="" />
+              <strong>The Journey</strong>
+              <span>{storyChapter}</span>
+            </button>
             <button className="mode-button arcade" type="button" onClick={onPlayArcade}>
               <img src={assetPaths.lambSwing} alt="" />
               <strong>Smash!</strong>

@@ -14,7 +14,9 @@ import {
 import { useKeyboardInput } from './input'
 import { TREE_HEALTH } from './constants'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
+import { CHAPTERS, nextChapter, type Chapter } from './campaign'
 import { GameHud, StartOverlay, EndOverlay } from './ArcadeOverlays'
+import { StoryHud, ChapterOverlay } from './StoryOverlays'
 import { ValleyRenderer } from '../render/Renderer'
 import {
   readBestScores,
@@ -35,6 +37,10 @@ const EMPTY_INPUT: GameInput = { active: false, x: 0, y: 0 }
 
 const emptySnapshot: GameSnapshot = {
   phase: 'ready',
+  mode: 'arcade',
+  chapterId: null,
+  objectives: [],
+  objectiveFraction: 0,
   roundMinutes: 2,
   timeLeft: 120,
   score: 0,
@@ -60,6 +66,7 @@ const emptySnapshot: GameSnapshot = {
     lemonsCollected: 0,
     leavesCollected: 0,
     cupsSold: 0,
+    cupsBrewed: 0,
     sparkleCups: 0,
     crittersFreed: 0,
   },
@@ -112,6 +119,8 @@ export function GameCanvas({
   onToggleMute,
   onExit,
   decorations,
+  chapter,
+  onChapterComplete,
 }: {
   sound: SoundManager
   muted: boolean
@@ -119,6 +128,9 @@ export function GameCanvas({
   onExit: () => void
   /** Trinkets bought in the stand's shop — they dress the arcade stand too. */
   decorations?: DecorationId[]
+  /** Present in story mode: which place this is, and what it asks for. */
+  chapter?: Chapter
+  onChapterComplete?: (chapterId: string) => void
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -134,6 +146,7 @@ export function GameCanvas({
   const roundMinutesRef = useRef<RoundMinutes>(2)
   const listenerRef = useRef({ x: 0, z: 0, forwardX: 0, forwardZ: -1 })
   const decorationsRef = useRef(decorations ?? [])
+  const chapterRef = useRef(chapter)
   soundRef.current = sound
   decorationsRef.current = decorations ?? []
 
@@ -145,6 +158,8 @@ export function GameCanvas({
   const [isNewBest, setIsNewBest] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [quality, setQuality] = useState<QualityChoice>(() => readQuality())
+  // Resolved once the world is built, because `?chapter=` can supply it too.
+  const [activeChapter, setActiveChapter] = useState<Chapter | undefined>(chapter)
   roundMinutesRef.current = roundMinutes
 
   const bestForRound = useMemo(
@@ -175,7 +190,20 @@ export function GameCanvas({
       const savedQuality = readQuality()
       const healParam = params.get('heal')
       const duskParam = params.get('dusk')
-      const game = createGame(roundMinutesRef.current, autoStart ? 'playing' : 'ready')
+      // `?chapter=N` drops straight into a place without playing the journey to
+      // it — the only practical way to look at, or screenshot, chapter five.
+      const chapterParam = Number(params.get('chapter'))
+      const linkedChapter = Number.isFinite(chapterParam)
+        ? CHAPTERS[chapterParam - 1]
+        : undefined
+      const playing = chapterRef.current ?? linkedChapter
+      if (playing !== chapterRef.current) setActiveChapter(playing)
+      const game = createGame(
+        roundMinutesRef.current,
+        autoStart || playing ? 'playing' : 'ready',
+        20260802,
+        playing,
+      )
       const flockParam = Number(params.get('flock'))
       if (Number.isFinite(flockParam) && flockParam > 0) preFreeCritters(game, flockParam)
       const overParam = params.get('over')
@@ -322,24 +350,33 @@ export function GameCanvas({
         }
 
         if (state.phase === 'ended' && lastPhaseRef.current !== 'ended') {
-          const { best, isNewBest: newBest } = recordBestRound(
-            bestRef.current,
-            state.roundMinutes,
-            state.inventory.sold,
-            state.inventory.score,
-          )
-          bestRef.current = best
-          setBestByRound(best)
-          setIsNewBest(newBest)
-          setLeaderboard(
-            recordLeaderboard({
-              sold: state.inventory.sold,
-              score: state.inventory.score,
-              minutes: state.roundMinutes,
-              sparkleCups: state.stats.sparkleCups,
-              at: Date.now(),
-            }),
-          )
+          // Only a timed round has a time to be best at. A chapter ends in the
+          // same `ended` phase but carries the default two-minute setting it
+          // never used, so recording it here would overwrite the player's real
+          // two-minute Smash best with an untimed journey result and file it on
+          // the leaderboard as though it had been raced.
+          let newBest = false
+          if (state.mode === 'arcade') {
+            const recorded = recordBestRound(
+              bestRef.current,
+              state.roundMinutes,
+              state.inventory.sold,
+              state.inventory.score,
+            )
+            newBest = recorded.isNewBest
+            bestRef.current = recorded.best
+            setBestByRound(recorded.best)
+            setIsNewBest(newBest)
+            setLeaderboard(
+              recordLeaderboard({
+                sold: state.inventory.sold,
+                score: state.inventory.score,
+                minutes: state.roundMinutes,
+                sparkleCups: state.stats.sparkleCups,
+                at: Date.now(),
+              }),
+            )
+          }
           soundRef.current.play(newBest ? 'cheer' : 'fanfare')
           inputRef.current = EMPTY_INPUT
           joystickActiveRef.current = false
@@ -445,11 +482,16 @@ export function GameCanvas({
 
         {/* Held back until the world exists — a HUD full of zeros over an empty
             canvas is worse than no HUD. */}
-        {ready && <GameHud snapshot={snapshot} best={bestForRound} />}
+        {ready &&
+          (activeChapter ? (
+            <StoryHud snapshot={snapshot} chapter={activeChapter} />
+          ) : (
+            <GameHud snapshot={snapshot} best={bestForRound} />
+          ))}
 
         {!ready && <div className="loading-panel">Growing the valley…</div>}
 
-        {snapshot.phase === 'ready' && (
+        {snapshot.phase === 'ready' && !activeChapter && (
           <StartOverlay
             roundMinutes={roundMinutes}
             best={bestForRound}
@@ -461,15 +503,24 @@ export function GameCanvas({
           />
         )}
 
-        {snapshot.phase === 'ended' && (
-          <EndOverlay
-            snapshot={snapshot}
-            isNewBest={isNewBest}
-            leaderboard={leaderboard}
-            onPlayAgain={startRound}
-            onHome={onExit}
-          />
-        )}
+        {snapshot.phase === 'ended' &&
+          (activeChapter ? (
+            <ChapterOverlay
+              snapshot={snapshot}
+              chapter={activeChapter}
+              next={nextChapter(activeChapter.id)}
+              onNext={() => onChapterComplete?.(activeChapter.id)}
+              onHome={onExit}
+            />
+          ) : (
+            <EndOverlay
+              snapshot={snapshot}
+              isNewBest={isNewBest}
+              leaderboard={leaderboard}
+              onPlayAgain={startRound}
+              onHome={onExit}
+            />
+          ))}
 
         {/* Outside the controls strip: it's a setting, not a game control, and
             the strip is only ~180px tall so anchoring to its top misplaces it. */}

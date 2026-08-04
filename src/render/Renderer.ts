@@ -29,6 +29,7 @@ import {
 import type { GameEvent, GameState } from '../game/types'
 import type { DecorationId } from '../lib/storage'
 import { BLOOM_AREA, BLOOM_ORIGIN, sampleBloom } from '../game/bloom'
+import { objectiveFraction } from '../game/objectives'
 import { BloomMap } from './bloomMap'
 import { FollowCamera } from './camera'
 import { createDaylightState, evaluateDaylight } from './daylight'
@@ -98,6 +99,13 @@ const OCCLUSION_RADIUS = 2.4
 
 /** How far away someone can be and still catch Lammy's eye. */
 const LOOK_RANGE = 16
+
+/**
+ * How low the sun gets by the end of a chapter. Short of 1 on purpose: a full
+ * dusk is the timed round's "you ran out of light", and a chapter should finish
+ * warm and gold rather than on the failure state's palette.
+ */
+const STORY_DUSK_PEAK = 0.82
 
 export interface ValleyRendererOptions {
   tier?: QualityTier
@@ -366,9 +374,12 @@ export class ValleyRenderer {
       )
     }
 
-    this.water = new Water(world)
-    this.water.setSunDirection(SUN_DIRECTION)
-    this.worldGroup.add(this.water.mesh)
+    // Chapters on dry ground never build a water plane at all.
+    if (world.pond) {
+      this.water = new Water(world, world.pond)
+      this.water.setSunDirection(SUN_DIRECTION)
+      this.worldGroup.add(this.water.mesh)
+    }
 
     this.worldGroup.add(createRocks(world, layout.rocks, this.uniforms))
     this.worldGroup.add(createBushes(world, layout.bushes, this.uniforms, this.detailTexture))
@@ -794,12 +805,28 @@ export class ValleyRenderer {
 
     // The HUD calls the timer "Sunset", so the light had better agree with it.
     // Once the valley wakes the sun climbs back up instead of going down.
+    //
+    // A chapter has no clock to agree with, so the sun is moved by the work
+    // instead: the light goes gold as the objectives fill in. Every chapter
+    // therefore arrives at golden hour exactly as you finish it, because
+    // finishing is what makes the sun go down.
     const total = Math.max(1, state.roundMinutes * 60)
-    const elapsed = state.phase === 'ready' ? 0 : clamp01(1 - state.timeLeft / total)
-    const duskTarget = state.outcome === 'valleyWoke' ? 0 : elapsed
+    const story = state.mode === 'story'
+    const progress = story ? objectiveFraction(state) : clamp01(1 - state.timeLeft / total)
+    const elapsed = state.phase === 'ready' ? 0 : progress
+    // Waking the valley climbs the sun back up — but only in the timed round,
+    // where the clock running out is the failure and the sunrise is the reward
+    // for beating it. A chapter *ends* by completing, so sending dusk to zero
+    // there would snap the light back to midday on the very frame the ending
+    // card appears, undoing the arrival it was built toward.
+    const duskTarget = story
+      ? elapsed * STORY_DUSK_PEAK
+      : state.outcome === 'valleyWoke'
+        ? 0
+        : elapsed
     this.dusk =
       this.duskOverride ??
-      damp(this.dusk, duskTarget, state.outcome === 'valleyWoke' ? 0.9 : 6, dt)
+      damp(this.dusk, duskTarget, !story && state.outcome === 'valleyWoke' ? 0.9 : 6, dt)
     this.applyDaylight()
     this.uniforms.uTime.value = this.time
     this.uniforms.uPlayerPos.value.set(state.player.x, state.player.y, state.player.z)

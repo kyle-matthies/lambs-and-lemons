@@ -94,13 +94,16 @@ export function createTerrain(
     color.lerp(PALETTE.rock, steep * 0.85)
     color.lerp(PALETTE.rockDark, clamp01(steep - 0.55) * 0.7)
 
-    // Damp shoreline ring around the pond.
-    const pondDistance = Math.hypot(x - world.pond.x, z - world.pond.z)
-    const nearWater = 1 - smoothstep(world.pond.radius * 0.7, world.pond.radius * 1.18, pondDistance)
-    if (nearWater > 0) {
-      const submerged = smoothstep(world.waterLevel + 0.35, world.waterLevel - 0.6, y)
-      shore.copy(PALETTE.path).lerp(PALETTE.soil, submerged)
-      color.lerp(shore, clamp01(nearWater * (0.35 + submerged * 0.65)))
+    // Damp shoreline ring around the pond. A dry chapter simply skips it.
+    if (world.pond) {
+      const pond = world.pond
+      const pondDistance = Math.hypot(x - pond.x, z - pond.z)
+      const nearWater = 1 - smoothstep(pond.radius * 0.7, pond.radius * 1.18, pondDistance)
+      if (nearWater > 0) {
+        const submerged = smoothstep(world.waterLevel + 0.35, world.waterLevel - 0.6, y)
+        shore.copy(PALETTE.path).lerp(PALETTE.soil, submerged)
+        color.lerp(shore, clamp01(nearWater * (0.35 + submerged * 0.65)))
+      }
     }
 
     // A worn dirt apron where the stand sits — it should look walked-on.

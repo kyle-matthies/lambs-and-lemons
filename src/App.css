@@ -1489,3 +1489,76 @@ button:focus-visible,
     transition: none;
   }
 }
+
+/* ---- Story mode ------------------------------------------------------- */
+
+/*
+ * The chapter's name, set like a page header rather than a HUD element. It is
+ * the only thing on screen that tells you where you are, so it reads as part of
+ * the book instead of part of the interface.
+ */
+.chapter-strip {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.chapter-name {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff8e6;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(38, 30, 22, 0.42);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.objective-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.objective {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 12px;
+  background: rgba(24, 46, 34, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: #fff8e6;
+  font-weight: 700;
+  font-size: 13px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  /* Ticking off should feel like something happened. */
+  transition:
+    background 220ms ease-out,
+    opacity 220ms ease-out;
+}
+
+/* Done, but still legible — it stays on the list as something you achieved. */
+.objective.done {
+  background: rgba(94, 138, 72, 0.55);
+  opacity: 0.72;
+}
+
+.objective-icon {
+  font-size: 16px;
+  text-align: center;
+}
+
+.objective-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.story-hud .bloom-meter {
+  margin-top: 7px;
+}

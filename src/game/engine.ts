@@ -41,7 +41,6 @@ import {
   SWING_COOLDOWN,
   SWING_REACH,
   SWING_TIME,
-  TREE_COUNT,
   TREE_HEALTH,
   TREE_HIT_RADIUS,
   TREE_REGROW_TIME,
@@ -65,17 +64,31 @@ import type {
   Tree,
 } from './types'
 import { constrainToMeadow, createWorld, generateGroveLayout, isWalkable, type World } from './world'
+import type { Chapter } from './campaign'
+import { evaluateObjectives, objectiveFraction, objectivesComplete } from './objectives'
 
 const scratchPoint = { x: 0, z: 0 }
 
+/**
+ * Start a round.
+ *
+ * With no `chapter` this is arcade mode and behaves exactly as it always has —
+ * the default recipe *is* the old hardcoded valley, so the timed round is
+ * untouched by the campaign existing. Pass a chapter and you get that place
+ * instead, with its objectives and no clock.
+ */
 export function createGame(
   roundMinutes: RoundMinutes,
   phase: GamePhase = 'ready',
   seed = 20260802,
+  chapter?: Chapter,
 ): GameState {
-  const world = createWorld(seed)
-  const layout = generateGroveLayout(world, TREE_COUNT)
-  const rng = mulberry32(seed ^ 0x27d4eb2f)
+  // A place should look the same every time you walk into it, so a chapter fixes
+  // its own seed rather than taking the caller's.
+  const worldSeed = chapter ? chapter.seed : seed
+  const world = createWorld(worldSeed, chapter?.recipe)
+  const layout = generateGroveLayout(world)
+  const rng = mulberry32(worldSeed ^ 0x27d4eb2f)
   let nextId = 1
 
   const trees: Tree[] = layout.trees.map((spot) => ({
@@ -98,6 +111,9 @@ export function createGame(
     world,
     layout,
     phase,
+    mode: chapter ? 'story' : 'arcade',
+    chapterId: chapter?.id ?? null,
+    objectives: chapter?.objectives ?? [],
     roundMinutes,
     timeLeft: roundMinutes * 60,
     elapsed: 0,
@@ -123,7 +139,7 @@ export function createGame(
     trees,
     lemons: [],
     leaves: [],
-    critters: spawnCritters(world, seed),
+    critters: spawnCritters(world, worldSeed, chapter?.critters),
     flockSize: 0,
     bloomField: createBloomField(),
     bloomCoverage: 0,
@@ -136,6 +152,7 @@ export function createGame(
       lemonsCollected: 0,
       leavesCollected: 0,
       cupsSold: 0,
+      cupsBrewed: 0,
       sparkleCups: 0,
       crittersFreed: 0,
     },
@@ -204,17 +221,23 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
   }
 
   state.elapsed += dt
-  state.timeLeft = Math.max(0, state.timeLeft - dt)
-  const wholeSecond = Math.ceil(state.timeLeft)
-  if (wholeSecond !== state.lastWholeSecond) {
-    state.lastWholeSecond = wholeSecond
-    if (wholeSecond > 0 && wholeSecond <= COUNTDOWN_TICKS_FROM) {
-      state.events.push({ type: 'countdown', secondsLeft: wholeSecond })
+
+  // Story mode has no clock at all — no countdown, no way to run out, no way to
+  // lose. What ends a chapter is finishing its work, which is checked after the
+  // frame's actions have been applied.
+  if (state.mode === 'arcade') {
+    state.timeLeft = Math.max(0, state.timeLeft - dt)
+    const wholeSecond = Math.ceil(state.timeLeft)
+    if (wholeSecond !== state.lastWholeSecond) {
+      state.lastWholeSecond = wholeSecond
+      if (wholeSecond > 0 && wholeSecond <= COUNTDOWN_TICKS_FROM) {
+        state.events.push({ type: 'countdown', secondsLeft: wholeSecond })
+      }
     }
-  }
-  if (state.timeLeft <= 0) {
-    endRound(state, 'sunset')
-    return
+    if (state.timeLeft <= 0) {
+      endRound(state, 'sunset')
+      return
+    }
   }
 
   updatePlayer(state, input, dt)
@@ -227,6 +250,10 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
   collectItems(state)
   updateBrewing(state, dt)
   state.bloomCoverage = bloomCoverage(state.bloomField, state.world.playRadius)
+
+  // Checked last, so the objective that a bloom target depends on sees this
+  // frame's colour rather than the previous one's.
+  if (state.mode === 'story' && objectivesComplete(state)) endRound(state, 'valleyWoke')
 }
 
 /**
@@ -401,6 +428,10 @@ export function drainEvents(state: GameState) {
 export function takeSnapshot(state: GameState): GameSnapshot {
   return {
     phase: state.phase,
+    mode: state.mode,
+    chapterId: state.chapterId,
+    objectives: evaluateObjectives(state),
+    objectiveFraction: objectiveFraction(state),
     roundMinutes: state.roundMinutes,
     timeLeft: state.timeLeft,
     score: state.inventory.score,
@@ -470,6 +501,7 @@ function updateBrewing(state: GameState, dt: number) {
     state.inventory.sparkleCups += 1
   }
   state.inventory.cups += 1
+  state.stats.cupsBrewed += 1
   state.inventory.score += SCORE_BREW
   state.events.push({
     type: 'cupBrewed',
@@ -496,7 +528,13 @@ export function serveCup(state: GameState): Critter | null {
   if (served.sparkle) state.stats.sparkleCups += 1
   state.inventory.score += served.sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
 
-  if (countLost(state.critters) === 0) endRound(state, 'valleyWoke')
+  // In arcade mode the last cup *is* the win. A chapter, though, ends when its
+  // stated work is done and not a moment sooner — otherwise you could free
+  // everyone in the orchard and be thrown out with trees still standing and a
+  // checklist that never got ticked. That check lives in `updateGame`.
+  if (state.mode === 'arcade' && countLost(state.critters) === 0) {
+    endRound(state, 'valleyWoke')
+  }
   return served.critter
 }
 

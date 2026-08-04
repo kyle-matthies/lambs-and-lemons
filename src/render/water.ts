@@ -6,7 +6,7 @@ import {
   ShaderMaterial,
   Vector3,
 } from 'three'
-import type { World } from '../game/world'
+import type { Pond, World } from '../game/world'
 import { PALETTE } from './palette'
 
 /**
@@ -137,18 +137,19 @@ export class Water {
   readonly mesh: Mesh
   private readonly material: ShaderMaterial
 
-  constructor(world: World) {
-    const radius = world.pond.radius * 1.24
+  /** The pond is passed in rather than read off the world, because dry chapters have none. */
+  constructor(world: World, pond: Pond) {
+    const radius = pond.radius * 1.24
     const geometry = new CircleGeometry(radius, 72, 0, Math.PI * 2)
     geometry.rotateX(-Math.PI / 2)
-    geometry.translate(world.pond.x, world.waterLevel, world.pond.z)
+    geometry.translate(pond.x, world.waterLevel, pond.z)
 
     // Bake how deep the water is at every vertex.
     const position = geometry.attributes.position as BufferAttribute
     const depths = new Float32Array(position.count)
     for (let index = 0; index < position.count; index += 1) {
       const bed = world.heightAt(position.getX(index), position.getZ(index))
-      depths[index] = Math.max(0, world.waterLevel - bed) / world.pond.depth
+      depths[index] = Math.max(0, world.waterLevel - bed) / pond.depth
     }
     geometry.setAttribute('aDepth', new BufferAttribute(depths, 1))
 

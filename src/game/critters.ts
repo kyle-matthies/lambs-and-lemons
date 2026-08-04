@@ -31,11 +31,11 @@ import { constrainToMeadow, isWalkable, type World } from './world'
 
 const scratch = { x: 0, z: 0 }
 
-export function spawnCritters(world: World, seed: number): Critter[] {
+export function spawnCritters(world: World, seed: number, count = CRITTER_COUNT): Critter[] {
   const rng = mulberry32(seed ^ 0x63a17e)
   const critters: Critter[] = []
 
-  for (let index = 0; index < CRITTER_COUNT; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     const spot = findHome(world, rng, critters)
     critters.push({
       id: index + 1,
