@@ -26,7 +26,7 @@ test('chapter completion persists before leaving the ending and unlocks the next
 }) => {
   await page.goto('/?chapter=1&over=woke')
   await expect(
-    page.getByRole('heading', { name: /HOME MEADOW IS AWAKE/ }),
+    page.getByRole('heading', { name: /Home Meadow is awake/i }),
   ).toBeVisible()
   await expect
     .poll(() =>

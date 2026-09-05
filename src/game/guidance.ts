@@ -1,4 +1,5 @@
 import type { GameState } from './types'
+import { residentFor } from './residents'
 import { isWalkable } from './world'
 import { LEMON_PARTS_PER_CUP } from './constants'
 
@@ -25,14 +26,32 @@ export function getGuidance(state: GameState): Guidance {
   let target: { x: number; z: number } | undefined
   let icon = '🍋',
     title = 'Find a lemon',
-    detail = 'Move close, then smash!'
+    detail =
+      state.mode === 'story'
+        ? 'Walk over fallen fruit to gather it.'
+        : 'Move close, then smash!'
   const lost = state.critters.filter((c) => c.state === 'lost')
   const hasIngredients =
     state.inventory.lemons + state.inventory.juice >= LEMON_PARTS_PER_CUP
+  if (
+    state.mode === 'story' &&
+    state.outcome === 'valleyWoke' &&
+    lost.length === 0
+  ) {
+    return {
+      icon: '🌼',
+      title: 'Make yourself at home',
+      detail: 'Wander, say hello, or visit another place from the map.',
+      angle: null,
+      distance: 0,
+    }
+  }
   if (lost.length > 0 && state.inventory.cups > 0) {
-    target = nearest(lost)
+    const friend = nearest(lost)
+    target = friend
     icon = '💛'
-    title = 'Bring a friend some lemonade'
+    const name = friend && residentFor(state.chapterId, friend.id)?.name
+    title = name ? `Lemonade for ${name}` : 'Bring a friend some lemonade'
     detail = 'Follow the arrow. Tap Give when you’re close.'
   } else if (lost.length > 0 && hasIngredients) {
     target = state.stand
@@ -63,6 +82,19 @@ export function getGuidance(state: GameState): Guidance {
   }
   const pond = state.world.pond
   if (pond && target) {
+    const clearance = pond.radius * 0.82 + 1
+    // Fruit can roll closer to the shore than the walking route allows. Aim
+    // for a reachable point beside it; otherwise the arrow circles that fruit
+    // forever even though it is within gathering reach from the bank.
+    const shoreX = target.x - pond.x,
+      shoreZ = target.z - pond.z
+    const shoreDistance = Math.hypot(shoreX, shoreZ)
+    if (shoreDistance > 0 && shoreDistance < clearance + 0.1) {
+      target = {
+        x: pond.x + (shoreX / shoreDistance) * (clearance + 0.1),
+        z: pond.z + (shoreZ / shoreDistance) * (clearance + 0.1),
+      }
+    }
     const dx = target.x - state.player.x,
       dz = target.z - state.player.z
     const lengthSquared = dx * dx + dz * dz
@@ -74,7 +106,6 @@ export function getGuidance(state: GameState): Guidance {
           Math.max(0.01, lengthSquared),
       ),
     )
-    const clearance = pond.radius * 0.82 + 1
     const crossesWater =
       Math.hypot(
         state.player.x + dx * fraction - pond.x,

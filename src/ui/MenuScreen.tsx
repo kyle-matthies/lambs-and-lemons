@@ -73,7 +73,7 @@ export function MenuScreen({
             >
               <img src={assetPaths.lambSwing} alt="" />
               <strong>Smash!</strong>
-              <span>Wake the valley</span>
+              <span>Arcade · Race the sunset</span>
             </button>
             <button
               className="mode-button tycoon"

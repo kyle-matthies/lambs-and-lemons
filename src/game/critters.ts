@@ -276,6 +276,7 @@ export function serveNearestCritter(state: GameState): ServeResult | null {
 
   state.events.push({
     type: 'critterServed',
+    critterId: best.id,
     x: best.x,
     y: best.y,
     z: best.z,

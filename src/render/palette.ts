@@ -10,10 +10,10 @@ import { Color } from 'three'
  */
 
 export const PALETTE = {
-  grassDeep: new Color('#3f7d24'),
-  grassMid: new Color('#68b437'),
-  grassLight: new Color('#9ed653'),
-  grassDry: new Color('#c8cf5e'),
+  grassDeep: new Color('#456b38'),
+  grassMid: new Color('#81a957'),
+  grassLight: new Color('#b5cc79'),
+  grassDry: new Color('#d5cd94'),
   soil: new Color('#8b6239'),
   path: new Color('#c4a878'),
   rock: new Color('#9aa3a8'),
@@ -21,9 +21,9 @@ export const PALETTE = {
 
   bark: new Color('#a5713f'),
   barkDark: new Color('#77492a'),
-  leafDeep: new Color('#3f8f31'),
-  leafMid: new Color('#63bd45'),
-  leafLight: new Color('#95dc63'),
+  leafDeep: new Color('#386446'),
+  leafMid: new Color('#68905b'),
+  leafLight: new Color('#a3be7d'),
 
   lemon: new Color('#ffcf2e'),
   lemonLight: new Color('#ffe97d'),
@@ -56,7 +56,7 @@ export const PALETTE = {
   skyGlow: new Color('#ffe4a8'),
   sunDisc: new Color('#fff6d4'),
   sunLight: new Color('#fff0cd'),
-  bounceLight: new Color('#a7d878'),
+  bounceLight: new Color('#becd98'),
   fog: new Color('#d9eeff'),
 
   // The sour valley's own light: a cold, flat, pre-dawn key with slate haze.

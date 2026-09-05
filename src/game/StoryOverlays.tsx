@@ -1,132 +1,118 @@
 import type { Chapter } from './campaign'
+import { placeNote } from './residents'
 import type { GameSnapshot } from './types'
 
-/**
- * The story-mode HUD.
- *
- * Everything the arcade HUD shows about *pressure* is gone — no clock, no score,
- * no personal best. What replaces it is a checklist, because a chapter is a list
- * of things to do rather than a race, and because a list is the one readout a
- * child can parse at a glance: an icon they recognise, a number going up, and a
- * tick when it's finished.
- */
-export function StoryHud({ snapshot, chapter }: { snapshot: GameSnapshot; chapter: Chapter }) {
+export function StoryHud({
+  snapshot,
+  chapter,
+}: {
+  snapshot: GameSnapshot
+  chapter: Chapter
+}) {
   const bloomPercent = Math.round(snapshot.bloomCoverage * 100)
-
+  const restored = snapshot.outcome === 'valleyWoke'
   return (
     <div className="hud story-hud">
       <div className="chapter-strip">
         <span className="chapter-name">{chapter.title}</span>
       </div>
-
-      <ul className="objective-list" aria-label="What to do here">
-        {snapshot.objectives.map((line, index) => (
-          <li className={line.done ? 'objective done' : 'objective'} key={index}>
-            <span className="objective-icon">{line.icon}</span>
-            <span className="objective-label">{line.label}</span>
-            <strong className="objective-count">
-              {line.done ? '✓' : `${line.have}/${line.need}${line.suffix}`}
-            </strong>
-          </li>
-        ))}
-      </ul>
-
-      <div className="bloom-meter" aria-label={`Valley colour restored: ${bloomPercent} percent`}>
-        <div className="bloom-fill" style={{ width: `${Math.min(100, bloomPercent)}%` }} />
+      {restored ? (
+        <p className="at-home-note">A place to come back to.</p>
+      ) : (
+        <ul className="objective-list" aria-label="What to do here">
+          {snapshot.objectives.map((line, index) => (
+            <li
+              className={line.done ? 'objective done' : 'objective'}
+              key={index}
+            >
+              <span className="objective-icon">{line.icon}</span>
+              <span className="objective-label">Share a cup</span>
+              <strong className="objective-count">
+                {line.done ? '✓' : `${line.have}/${line.need}`}
+              </strong>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div
+        className="bloom-meter"
+        aria-label={`Valley colour restored: ${bloomPercent} percent`}
+      >
+        <div
+          className="bloom-fill"
+          style={{ width: `${Math.min(100, bloomPercent)}%` }}
+        />
         <span className="bloom-label">🌈 {bloomPercent}%</span>
       </div>
-
-      {snapshot.phase === 'playing' && snapshot.flockSize > 0 && (
-        <div className="flock-badge" aria-label={`${snapshot.flockSize} friends following`}>
-          🐑 ×{snapshot.flockSize}
-        </div>
-      )}
     </div>
   )
 }
 
-/**
- * The card at the end of a chapter.
- *
- * Placeholder wording for now — the storybook narration that belongs here lands
- * with the writing pass. What it already does correctly is refuse to talk about
- * winning: nothing was beaten, a place simply has its colour back.
- */
 export function ChapterOverlay({
   snapshot,
   chapter,
   next,
   onNext,
   onHome,
+  onStay,
 }: {
   snapshot: GameSnapshot
   chapter: Chapter
   next?: Chapter
   onNext: () => void
   onHome: () => void
+  onStay: () => void
 }) {
-  const bloomPercent = Math.round(snapshot.bloomCoverage * 100)
-  // Most chapters ask for some of their creatures, not all of them — finish the
-  // bloom or the trees first and you can leave with someone still waiting. The
-  // card has to say what actually happened, or the frozen scene behind it
-  // contradicts the words on top of it.
-  const everyoneServed = snapshot.lostCritters === 0
-
+  const note = placeNote(chapter.id)
   return (
     <div className="game-overlay">
-      <div className="end-panel triumphant">
-        <h2 className="new-best">{chapter.title.toUpperCase()} IS AWAKE!</h2>
-        <p className="end-blurb">
-          {everyoneServed
-            ? 'Everyone here has had a cup. '
-            : `${chapter.title} has its colour back. `}
-          {next
-            ? next.blurb
-            : 'Every corner of the valley is awake now. You walked the whole way.'}
-        </p>
-
-        <div className="stat-rows">
-          <StatRow icon="💛" label="Friends helped" value={snapshot.stats.crittersFreed} />
-          <StatRow icon="🌈" label="Valley colour" value={bloomPercent} suffix="%" />
-          <StatRow icon="🍋" label="Lemons smashed" value={snapshot.stats.lemonsSmashed} />
+      <div
+        className="end-panel chapter-ending"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="chapter-ending-title"
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return
+          const buttons =
+            event.currentTarget.querySelectorAll<HTMLButtonElement>('button')
+          const first = buttons[0],
+            last = buttons[buttons.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last?.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first?.focus()
+          }
+        }}
+      >
+        <p className="eyebrow">A GOOD DAY IN THE VALLEY</p>
+        <h2 id="chapter-ending-title">{chapter.title} is awake</h2>
+        <p className="end-blurb">{note.ending}</p>
+        <div className="chapter-keepsake">
+          <span aria-hidden="true">{note.icon}</span>
+          <div>
+            <small>A LITTLE SOMETHING FOR YOUR JOURNAL</small>
+            <strong>{note.gift}</strong>
+          </div>
         </div>
-
-        {next ? (
-          <button className="start-button" type="button" onClick={onNext}>
-            On to {next.title}
-          </button>
-        ) : (
-          <button className="start-button" type="button" onClick={onHome}>
-            The end
+        <p className="chapter-shared">
+          {snapshot.lostCritters === 0
+            ? 'Everyone here has had a cup.'
+            : `${snapshot.stats.crittersFreed} neighbours have shared a cup. There are more friends to find whenever you like.`}
+        </p>
+        <button className="start-button" autoFocus onClick={onStay}>
+          Stay a little longer
+        </button>
+        {next && (
+          <button className="paper-button" onClick={onNext}>
+            On to {next.title} →
           </button>
         )}
-        <button className="quiet-button" type="button" onClick={onHome}>
+        <button className="quiet-button" onClick={onHome}>
           Back to the map
         </button>
       </div>
-    </div>
-  )
-}
-
-function StatRow({
-  icon,
-  label,
-  value,
-  suffix,
-}: {
-  icon: string
-  label: string
-  value: number
-  suffix?: string
-}) {
-  return (
-    <div className="stat-row">
-      <span className="stat-icon">{icon}</span>
-      <span className="stat-label">{label}</span>
-      <strong>
-        {value}
-        {suffix}
-      </strong>
     </div>
   )
 }

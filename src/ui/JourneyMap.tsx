@@ -1,3 +1,4 @@
+import { NeighbourJournal } from './NeighbourJournal'
 import { CHAPTERS } from '../game/campaign'
 import type { JourneySave } from '../lib/storage'
 import { assetPaths } from '../game/assets'
@@ -38,7 +39,7 @@ export function JourneyMap({
               <button
                 className={`chapter-card${done ? ' complete' : ''}`}
                 disabled={!unlocked}
-                aria-label={`${chapter.title}${done ? ', complete, play again' : unlocked ? ', ready to explore' : ', locked'}`}
+                aria-label={`${chapter.title}${done ? ', complete, visit again' : unlocked ? ', ready to explore' : ', locked'}`}
                 onClick={() => onSelect(chapter.id)}
               >
                 <span className="chapter-landmark" aria-hidden="true">
@@ -47,7 +48,7 @@ export function JourneyMap({
                 <span className="chapter-copy">
                   <small>
                     CHAPTER {index + 1}
-                    {done ? ' · AWAKE' : ''}
+                    {done ? ' · COME ON IN' : ''}
                   </small>
                   <strong>{chapter.title}</strong>
                   <span>{chapter.blurb}</span>
@@ -60,6 +61,7 @@ export function JourneyMap({
           )
         })}
       </ol>
+      <NeighbourJournal completed={save.completed} />
       <footer className="map-footer">
         <img src={assetPaths.lambIdle} alt="Lammy the lamb" />
         <p>

@@ -6,7 +6,7 @@ export type RoundMinutes = 1 | 2 | 3 | 4 | 5
 
 /**
  * Arcade is the timed round: a clock, a score, a sunset you race. Story is the
- * journey: no clock and no way to lose, ending when the chapter's work is done.
+ * journey: no clock or loss, with restored places remaining open to explore.
  */
 export type GameMode = 'arcade' | 'story'
 
@@ -59,6 +59,7 @@ export type GameEvent =
   | { type: 'cupBrewed'; x: number; y: number; z: number; sparkle: boolean }
   | {
       type: 'critterServed'
+      critterId: number
       x: number
       y: number
       z: number

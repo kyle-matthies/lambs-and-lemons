@@ -17,15 +17,15 @@ function liveState(state: GameState) {
 export function saveCheckpoint(state: GameState): boolean {
   if (!state.chapterId) return false
   try {
-    if (state.phase === 'ended') {
+    if (state.phase === 'ended' && state.outcome !== 'valleyWoke') {
       localStorage.removeItem(key(state.chapterId))
-    } else if (state.phase === 'playing') {
+    } else if (state.phase === 'playing' || state.outcome === 'valleyWoke') {
       localStorage.setItem(
         key(state.chapterId),
         JSON.stringify({
           version: 1,
           seed: state.world.seed,
-          live: liveState(state),
+          live: { ...liveState(state), phase: 'playing' },
           cells: Array.from(state.bloomField.cells),
         }),
       )
@@ -73,7 +73,10 @@ export function restoreCheckpoint(state: GameState): boolean {
     if (
       saved?.version !== 1 ||
       saved.seed !== state.world.seed ||
-      !matchesShape(saved.live, liveState(state))
+      !matchesShape(saved.live, {
+        ...liveState(state),
+        outcome: saved.live?.outcome === 'valleyWoke' ? 'valleyWoke' : null,
+      })
     )
       return false
     const live = saved.live as ReturnType<typeof liveState>
@@ -81,7 +84,7 @@ export function restoreCheckpoint(state: GameState): boolean {
       live.chapterId !== state.chapterId ||
       live.mode !== 'story' ||
       live.phase !== 'playing' ||
-      live.outcome !== null
+      (live.outcome !== null && live.outcome !== 'valleyWoke')
     )
       return false
     if (

@@ -7,6 +7,7 @@ import {
   finishRound,
   preFreeCritters,
   serveCup,
+  stayInChapter,
   swingHammer,
   takeSnapshot,
   updateGame,
@@ -14,6 +15,14 @@ import {
 import { useKeyboardInput } from './input'
 import { saveCheckpoint, restoreCheckpoint } from './checkpoint'
 import { getGuidance, type Guidance } from './guidance'
+import {
+  nearbyResident,
+  residentFor,
+  placeNote,
+  type Resident,
+} from './residents'
+import { rememberResident } from '../lib/journal'
+import { ResidentPortrait } from '../ui/ResidentPortrait'
 import { TREE_HEALTH } from './constants'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
 import { CHAPTERS, nextChapter, type Chapter } from './campaign'
@@ -22,6 +31,7 @@ import { StoryHud, ChapterOverlay } from './StoryOverlays'
 import { ValleyRenderer } from '../render/Renderer'
 import {
   readBestScores,
+  readJourney,
   readLeaderboard,
   readQuality,
   recordBestRound,
@@ -169,8 +179,15 @@ export function GameCanvas({
   const actionPointerRef = useRef<number | null>(null)
   const chapterFinishedRef = useRef(onChapterFinished)
   chapterFinishedRef.current = onChapterFinished
+  const [conversation, setConversation] = useState<{
+    resident: Resident
+    shared: boolean
+  } | null>(null)
+  const [neighbour, setNeighbour] = useState<Resident | null>(null)
+  const [sharedMoment, setSharedMoment] = useState<Resident | null>(null)
   const [paused, setPaused] = useState(false)
   const [rendererError, setRendererError] = useState(false)
+  const [journalAvailable, setJournalAvailable] = useState(true)
   const [saveAvailable, setSaveAvailable] = useState(true)
   const [guidance, setGuidance] = useState<Guidance | null>(null)
   const [ready, setReady] = useState(false)
@@ -234,8 +251,24 @@ export function GameCanvas({
         !params.has('over') &&
         !params.has('flock') &&
         !params.has('heal')
-      )
-        restoreCheckpoint(game)
+      ) {
+        const restored = restoreCheckpoint(game)
+        if (restored) {
+          for (const critter of game.critters.filter(
+            (c) => c.state !== 'lost',
+          )) {
+            const resident = residentFor(game.chapterId, critter.id)
+            if (resident && !rememberResident(resident.id, true))
+              setJournalAvailable(false)
+          }
+        }
+        // Older completion-only saves still open a welcoming restored place.
+        if (!restored && readJourney().completed.includes(playing.id)) {
+          finishRound(game, 'valleyWoke')
+          stayInChapter(game)
+          drainEvents(game)
+        }
+      }
       const flockParam = Number(params.get('flock'))
       if (Number.isFinite(flockParam) && flockParam > 0)
         preFreeCritters(game, flockParam)
@@ -371,7 +404,13 @@ export function GameCanvas({
               case 'treeBreak':
                 buzz([18, 40, 26])
                 break
-              case 'critterServed':
+              case 'critterServed': {
+                const resident = residentFor(state.chapterId, event.critterId)
+                if (resident) {
+                  if (!rememberResident(resident.id, true))
+                    setJournalAvailable(false)
+                  setSharedMoment(resident)
+                }
                 sound.playAt(
                   event.sparkle ? 'sparkle' : 'ding',
                   event.x,
@@ -380,6 +419,7 @@ export function GameCanvas({
                 sound.playAt('bleat', event.x, event.z)
                 buzz([22, 50, 22, 50, 38])
                 break
+              }
               case 'flockJoin':
                 sound.playAt('bleat', event.x, event.z)
                 sound.play('coin')
@@ -408,7 +448,7 @@ export function GameCanvas({
             listenerRef.current.forwardZ,
           )
           const urgency =
-            state.phase === 'playing'
+            state.phase === 'playing' && state.mode === 'arcade'
               ? 1 -
                 Math.min(
                   1,
@@ -462,6 +502,10 @@ export function GameCanvas({
         if (now - lastUiTime > 90) {
           setSnapshot(takeSnapshot(state))
           setGuidance(getGuidance(state))
+          const nearby = nearbyResident(state)
+          setNeighbour(
+            nearby ? (residentFor(state.chapterId, nearby.id) ?? null) : null,
+          )
           lastUiTime = now
           if (now - lastSaveTime > 5000 && state.mode === 'story') {
             setSaveAvailable(saveCheckpoint(state))
@@ -571,8 +615,35 @@ export function GameCanvas({
   const resumeGame = useCallback(() => {
     pausedRef.current = false
     setPaused(false)
+    setConversation(null)
     soundRef.current.startScene()
   }, [])
+  useEffect(() => {
+    if (!sharedMoment) return
+    const timer = window.setTimeout(() => setSharedMoment(null), 8000)
+    return () => window.clearTimeout(timer)
+  }, [sharedMoment])
+  const talkToNeighbour = () => {
+    const state = gameRef.current
+    if (!state) return
+    const nearby = nearbyResident(state)
+    const resident = nearby && residentFor(state.chapterId, nearby.id)
+    if (!nearby || !resident) return
+    pauseGame()
+    const shared = nearby.state !== 'lost'
+    if (!rememberResident(resident.id, shared)) setJournalAvailable(false)
+    setSharedMoment(null)
+    setConversation({ resident, shared })
+  }
+  const stayHere = () => {
+    const state = gameRef.current
+    if (!state || !stayInChapter(state)) return
+    lastPhaseRef.current = 'playing'
+    setSnapshot(takeSnapshot(state))
+    setSharedMoment(null)
+    setSaveAvailable(saveCheckpoint(state))
+    soundRef.current.startScene()
+  }
   useEffect(() => {
     const onVisibility = () => {
       if (document.hidden) pauseGame()
@@ -651,7 +722,7 @@ export function GameCanvas({
             Ⅱ
           </button>
         )}
-        {paused && (
+        {paused && !conversation && (
           <div className="game-overlay pause-overlay">
             <div
               className="end-panel pause-panel"
@@ -681,7 +752,11 @@ export function GameCanvas({
               </span>
               <p className="eyebrow">TAKE A LITTLE BREAK</p>
               <h2 id="pause-title">The valley can wait.</h2>
-              <p>Your game is paused. Stay a while.</p>
+              <p>
+                {activeChapter
+                  ? placeNote(activeChapter.id).invitation
+                  : 'Your game is paused. Stay a while.'}
+              </p>
               <button className="start-button" autoFocus onClick={resumeGame}>
                 Keep playing
               </button>
@@ -689,11 +764,11 @@ export function GameCanvas({
                 {muted ? 'Turn sound on' : 'Turn sound off'}
               </button>
               <button className="quiet-button" onClick={onExit}>
-                {activeChapter ? 'Back to the chapter map' : 'Back home'}
+                {activeChapter ? 'Journal & chapter map' : 'Back home'}
               </button>
               <small>
                 {activeChapter
-                  ? saveAvailable
+                  ? saveAvailable && journalAvailable
                     ? 'Your journey saves on this device as you play.'
                     : 'Saving is unavailable. Keep this tab open to keep your progress.'
                   : 'Leaving ends this round.'}
@@ -701,8 +776,66 @@ export function GameCanvas({
             </div>
           </div>
         )}
+        {conversation && (
+          <div className="game-overlay conversation-overlay">
+            <div
+              className="conversation-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="conversation-name"
+              onKeyDown={(event) => {
+                if (event.key === 'Tab') {
+                  event.preventDefault()
+                  event.currentTarget.querySelector('button')?.focus()
+                }
+              }}
+            >
+              <ResidentPortrait
+                kind={conversation.resident.kind}
+                name={conversation.resident.name}
+              />
+              <p className="eyebrow">{conversation.resident.interest}</p>
+              <h2 id="conversation-name">{conversation.resident.name}</h2>
+              <p className="conversation-words">
+                “
+                {conversation.shared
+                  ? conversation.resident.thanks
+                  : conversation.resident.hello}
+                ”
+              </p>
+              <small>
+                {conversation.shared
+                  ? '♥ A cup shared. A friend to come back to.'
+                  : 'Added to your valley journal.'}
+              </small>
+              <button className="start-button" autoFocus onClick={resumeGame}>
+                See you around
+              </button>
+            </div>
+          </div>
+        )}
+        {sharedMoment && !paused && snapshot.phase === 'playing' && (
+          <div className="shared-moment" role="status">
+            <ResidentPortrait
+              kind={sharedMoment.kind}
+              name={sharedMoment.name}
+            />
+            <div>
+              <strong>{sharedMoment.name} · a cup shared</strong>
+              <p>“{sharedMoment.thanks}”</p>
+            </div>
+          </div>
+        )}
         {ready && !paused && snapshot.phase === 'playing' && guidance && (
           <aside className="field-guide" aria-label="Your next step">
+            {neighbour && (
+              <button
+                className="neighbour-talk paper-button"
+                onClick={talkToNeighbour}
+              >
+                Say hello to {neighbour.name} <span aria-hidden="true">↗</span>
+              </button>
+            )}
             <div className="guide-inventory">
               <span>🍋 {snapshot.lemons + snapshot.juice}</span>
               <span>🥤 {snapshot.cups}/3</span>
@@ -755,6 +888,7 @@ export function GameCanvas({
               next={nextChapter(activeChapter.id)}
               onNext={() => onChapterComplete?.(activeChapter.id)}
               onHome={onExit}
+              onStay={stayHere}
             />
           ) : (
             <EndOverlay
@@ -822,7 +956,13 @@ export function GameCanvas({
           <button
             className={`smash-control${snapshot.canServe ? ' serving' : ''}`}
             type="button"
-            aria-label={snapshot.canServe ? 'Give a cup' : 'Smash'}
+            aria-label={
+              snapshot.canServe
+                ? 'Give a cup'
+                : activeChapter
+                  ? 'Gather'
+                  : 'Smash'
+            }
             onPointerDown={(event) => {
               event.preventDefault()
               if (actionPointerRef.current !== null) return
@@ -857,13 +997,16 @@ export function GameCanvas({
             ) : (
               <img src={assetPaths.smashButton} alt="" />
             )}
-            <span>{snapshot.canServe ? 'Give!' : 'Smash'}</span>
+            <span>
+              {snapshot.canServe ? 'Give!' : activeChapter ? 'Gather' : 'Smash'}
+            </span>
           </button>
         </div>
         {ready && !paused && (
           <p className="keyboard-hint">
             <kbd>W A S D</kbd> or arrows to move <span>·</span> <kbd>Space</kbd>{' '}
-            to smash <span>·</span> <kbd>Esc</kbd> to pause
+            {activeChapter ? 'to gather / give' : 'to smash'} <span>·</span>{' '}
+            <kbd>Esc</kbd> to pause
           </p>
         )}
       </section>

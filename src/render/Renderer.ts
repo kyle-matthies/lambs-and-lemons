@@ -456,7 +456,7 @@ export class ValleyRenderer {
       this.bloomMap.flood(this.renderer)
       return
     }
-    if (state.elapsed > 0 && state.mode === 'story') {
+    if ((state.elapsed > 0 || state.outcome === 'valleyWoke') && state.mode === 'story') {
       this.bloomMap.restore(this.renderer, state.bloomField.cells)
       return
     }
