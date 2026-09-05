@@ -771,6 +771,7 @@ export function GameCanvas({
         <button
           className="mute-control"
           type="button"
+          onPointerDown={(event) => event.preventDefault()}
           onClick={onToggleMute}
           aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
         >

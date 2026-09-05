@@ -57,6 +57,7 @@ export function useKeyboardInput(
       )
         return
       if (event.code === 'Space') {
+        if (target instanceof HTMLElement && target.closest('button')) return
         if (!event.repeat) onSmash()
         event.preventDefault()
         return
