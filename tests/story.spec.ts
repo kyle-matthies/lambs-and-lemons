@@ -73,19 +73,22 @@ test('objectives tick over as the simulation runs', async ({ page }) => {
   const smashLine = checklist.getByRole('listitem').first()
   await expect(smashLine).toContainText('0/8')
 
-  // Walk into the ring of fruit the chapter opens with, then swing — the mallet
-  // only reaches a few metres, so standing still and swinging hits nothing. The
-  // bot in `scripts/simulate.mjs` covers the whole loop; this only proves the
-  // HUD is wired to the same state the simulation is changing.
-  for (let sweep = 0; sweep < 4; sweep += 1) {
-    await page.keyboard.down('ArrowUp')
-    await page.waitForTimeout(700)
-    await page.keyboard.up('ArrowUp')
-    for (let swing = 0; swing < 4; swing += 1) {
-      await page.keyboard.press('Space')
-      await page.waitForTimeout(260)
-    }
-  }
-
-  await expect(smashLine).not.toContainText('0/8')
+  // Follow the visible guide and hold Smash until a real hit registers. Fixed
+  // 700ms keyboard taps barely move on Linux's software GPU; the test should
+  // wait for gameplay, rather than assume a particular rendering speed.
+  const arrow = page.locator('.guide-compass b')
+  await expect(arrow).toBeVisible()
+  const angle = await arrow.evaluate(element =>
+    Number(element.style.transform.match(/rotate\(([-\d.]+)deg\)/)?.[1] ?? 0) * Math.PI / 180)
+  const joystick = page.locator('.joystick')
+  const box = (await joystick.boundingBox())!
+  await joystick.dispatchEvent('pointerdown', {
+    pointerId: 11, pointerType: 'touch',
+    clientX: box.x + box.width / 2 + Math.sin(angle) * box.width * 0.32,
+    clientY: box.y + box.height / 2 - Math.cos(angle) * box.width * 0.32,
+  })
+  await page.locator('.smash-control').dispatchEvent('pointerdown', {pointerId:12, pointerType:'touch'})
+  await expect(smashLine).not.toContainText('0/8', {timeout:45000})
+  await joystick.dispatchEvent('pointerup', {pointerId:11, pointerType:'touch'})
+  await page.locator('.smash-control').dispatchEvent('pointerup', {pointerId:12, pointerType:'touch'})
 })
