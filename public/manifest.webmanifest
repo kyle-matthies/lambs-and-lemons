@@ -4,7 +4,7 @@
   "description": "The valley has gone grey. Smash lemons, brew lemonade, and bring the colours back.",
   "start_url": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#16303a",
   "theme_color": "#16303a",
   "icons": [

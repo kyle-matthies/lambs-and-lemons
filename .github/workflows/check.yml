@@ -1,0 +1,25 @@
+name: Game checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:sim
+      - run: npm run test:reliability
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:e2e -- --workers=2
+      - run: npm run test:platform

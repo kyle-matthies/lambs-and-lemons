@@ -22,7 +22,7 @@ interface Shake {
 // ~33° above the horizon in landscape, a little steeper on a phone so the play
 // area still fits. Low enough that the hills, the sky and the trees read as 3D.
 const LANDSCAPE = { distance: 10.4, height: 3.7, fov: 42, lookAhead: 3.2 }
-const PORTRAIT = { distance: 10.2, height: 5.1, fov: 52, lookAhead: 4.2 }
+const PORTRAIT = { distance: 11.4, height: 7.8, fov: 54, lookAhead: 2.0 }
 
 /**
  * Extra upward tilt applied after the look-at, in radians.
@@ -48,6 +48,7 @@ export class FollowCamera {
   private readonly shakeOffset = new Vector3()
   private readonly shakes: Shake[] = []
   private framing = LANDSCAPE
+  private horizonTilt = HORIZON_TILT
   private boom = 1
   private shakeScale = 1
   private punchAmount = 0
@@ -62,6 +63,8 @@ export class FollowCamera {
   setAspect(aspect: number) {
     // 0 for a wide desktop window, 1 for a tall phone held upright.
     const portrait = clamp01(inverseLerp(1.05, 0.52, aspect))
+    // Frame Lammy above guidance and thumb controls on short phone viewports.
+    this.horizonTilt = lerp(HORIZON_TILT, -0.06, portrait)
     this.framing = {
       distance: lerp(LANDSCAPE.distance, PORTRAIT.distance, portrait),
       height: lerp(LANDSCAPE.height, PORTRAIT.height, portrait),
@@ -98,9 +101,10 @@ export class FollowCamera {
   reset(x: number, y: number, z: number, world: World) {
     this.updateTargets(x, y, z, 0, 0, 1)
     this.camera.position.copy(this.desired)
+    this.target.copy(this.lookTarget)
     this.avoidGround(world)
     this.camera.lookAt(this.lookTarget)
-    this.camera.rotateX(HORIZON_TILT)
+    this.camera.rotateX(this.horizonTilt)
     this.shakes.length = 0
   }
 
@@ -153,7 +157,7 @@ export class FollowCamera {
     this.target.y = damp(this.target.y, this.lookTarget.y, 5, dt)
     this.target.z = damp(this.target.z, this.lookTarget.z, 7, dt)
     this.camera.lookAt(this.target)
-    this.camera.rotateX(HORIZON_TILT)
+    this.camera.rotateX(this.horizonTilt)
 
     if (this.punchTime > 0) this.punchTime = Math.max(0, this.punchTime - dt)
     this.applyShake(dt)

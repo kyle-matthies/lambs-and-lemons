@@ -456,6 +456,10 @@ export class ValleyRenderer {
       this.bloomMap.flood(this.renderer)
       return
     }
+    if (state.elapsed > 0 && state.mode === 'story') {
+      this.bloomMap.restore(this.renderer, state.bloomField.cells)
+      return
+    }
     // Mirrors the same two seed splats the simulation stamps in `createGame`.
     this.bloomMap.splat(state.stand.x, state.stand.z, 9, 0.9)
     this.bloomMap.splat(state.player.x, state.player.z, 5, 0.55)
