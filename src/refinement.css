@@ -835,3 +835,14 @@ button:focus-visible {
     scroll-behavior: auto !important;
   }
 }
+
+/* Notches remain clear even when a landscape phone crosses the desktop breakpoint. */
+.phone-stage.world .joystick {
+  left: max(calc(env(safe-area-inset-left) + 18px), calc((100vw - 1280px) / 2 + 18px));
+}
+.phone-stage.world .smash-control {
+  right: max(calc(env(safe-area-inset-right) + 18px), calc((100vw - 1280px) / 2 + 18px));
+}
+.menu-stage {
+  align-items: safe center;
+}

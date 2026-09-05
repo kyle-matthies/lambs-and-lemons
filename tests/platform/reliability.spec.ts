@@ -217,3 +217,18 @@ test('losing the graphics context preserves a checkpoint and offers recovery', a
     ),
   ).toBeTruthy()
 })
+
+test('keyboard movement still works with the sound button focused', async ({page}) => {
+  await page.goto('/?chapter=1')
+  await expect(page.locator('.story-hud')).toBeVisible()
+  await page.getByRole('button', {name:'Pause game'}).click()
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('lammy-checkpoint-v1:home-meadow')!).live.player.z)
+  await page.getByRole('button', {name:'Keep playing'}).click()
+  await page.getByRole('button', {name:'Mute sounds'}).focus()
+  await page.keyboard.down('ArrowUp')
+  await page.waitForTimeout(700)
+  await page.keyboard.up('ArrowUp')
+  await page.getByRole('button', {name:'Pause game'}).click()
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('lammy-checkpoint-v1:home-meadow')!).live.player.z)
+  expect(after).toBeLessThan(before)
+})

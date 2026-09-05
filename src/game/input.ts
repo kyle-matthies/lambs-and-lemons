@@ -52,7 +52,7 @@ export function useKeyboardInput(
       if (
         target instanceof HTMLElement &&
         target.closest(
-          'button, input, select, textarea, [contenteditable=true]',
+          'input, select, textarea, [contenteditable=true]',
         )
       )
         return
