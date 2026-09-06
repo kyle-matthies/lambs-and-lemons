@@ -1,4 +1,4 @@
-# Lammy's Lemonade Smash 🐑🍋🔨
+# Lambs & Lemons
 
 ### *The Sour Valley*
 
@@ -20,14 +20,43 @@ them a cup of lemonade, walk it over, and they bloom back into colour and fall
 in behind you — and from then on they trail a little colour of their own
 wherever they run.
 
-Free everyone before the sun goes down and the whole valley wakes up at once.
+The main adventure is unhurried: make friends and bring places back to life.
+In the separate arcade, share every cup before sunset.
 
 The point of the design is that **the graphics are the mechanic**. The recovery
 number that paints the grass is the same number that drives the sun's height and
 warmth, the fog, the exposure, the sky, and which layers of the soundtrack are
 playing. Playing well doesn't so much score points as change the weather.
 
-## Two ways to play
+## Three ways to play
+
+### The Journey
+
+Five untimed chapters lead from Home Meadow to Sunset Hollow. The chapter map
+shows which places are awake and unlocks the next place when its objectives are
+complete. The field guide follows your inventory: find lemons, make lemonade at
+the stand, then take a cup to a friend. Its arrow routes around the ponds.
+
+The journey checkpoints every five seconds, when paused, and when leaving a
+chapter. Reloading restores Lammy, ingredients, trees, friends, and the colour
+already restored. Saves stay on this browser/device; they are not cloud saves.
+Completing a chapter keeps its restored world. Stay a little longer or visit again
+from the map; colour, ingredients, and the friends still waiting for a cup remain.
+Older completion-only saves open a restored version of the place.
+
+Meet 35 named neighbours with individual interests and conversations. Say hello
+when nearby, or share lemonade to add a friendship to the valley journal. Five
+chapter keepsakes remember the places you have restored. The journal is on the
+chapter map. Conversations pause play and can be closed with Escape.
+
+Gather fallen fruit simply by walking over it. The action button also gathers
+juice and shakes fruit from trees; adventure harvesting never fells a tree.
+Chapters ask you to share with neighbours, without mandatory smashing, tree
+felling, or colour-percentage chores.
+
+Pause with the top-left button or Escape. Switching apps pauses automatically.
+The game offers recovery if browser graphics become unavailable.
+
 
 ### 🔨 Smash! (the valley)
 
@@ -36,8 +65,8 @@ loose lemons into juice, brew cups at the stand, and carry them out to whoever i
 waiting. One button does both jobs — it becomes **Give!** whenever someone is
 close enough to hand a cup to.
 
-- **Touch**: left thumb joystick + right thumb action button
-- **Keyboard**: WASD / arrows to move, Space to smash or give
+- **Touch**: left thumb joystick + right thumb action button; hold Smash for repeated swings
+- **Keyboard**: WASD / arrows to move, Space to smash or give, Escape to pause/resume
 
 A 2-minute round is the sweet spot: winnable, but you'll be running.
 
@@ -55,8 +84,8 @@ Spend the takings on decorations, which show up on the stand in **both** modes.
 - **Everything is generated at runtime.** No models, no textures, no audio files.
   Terrain, grass, trees, animals, the stand and its decorations are all built
   from primitives at boot; every sound is synthesized with the Web Audio API.
-- No backend: progress lives in `localStorage`
-- Mobile-first: multi-touch, safe areas, landscape support, installable
+- No backend: progress and validated journey checkpoints live in `localStorage`
+- Mobile-first: multi-touch, safe areas, portrait and landscape layouts, home-screen manifest. Launching requires a network connection.
 
 ### How it's put together
 
@@ -127,7 +156,26 @@ print what happened — that's what the pacing was tuned against.
 npm run test:e2e
 ```
 
-Playwright smoke tests, iPhone-sized, on headless Chromium with SwiftShader.
+Playwright gameplay tests, iPhone-sized, on headless Chromium with SwiftShader.
+
+```bash
+npm run test:reliability
+npm run test:platform
+```
+
+Checkpoint round trips cover all five chapters. Platform checks cover iPhone-sized
+Chromium, iPhone-sized WebKit, and desktop Chromium: pause, multitouch ownership,
+chapter unlocks, corrupt saves, reload recovery, short viewports, and WebGL failure.
+Real interaction tests cover talking, sharing a cup, earning a keepsake, staying
+after completion, and returning to a restored place. Headless checks also verify
+resident identity, journal validation, and adventure/arcade harvesting differences.
+Install the browser engines first with `npx playwright install chromium webkit`.
+PRs run these checks in GitHub Actions.
+
+WebKit emulation is a compatibility check, not a physical iPhone certification.
+Before calling a release phone-ready, play a full journey on an actual iPhone in
+Safari and from the home screen, including rotation, screen lock, audio, and a
+long session. Native App Store packaging and offline play are not implemented.
 
 ```bash
 npm run shots

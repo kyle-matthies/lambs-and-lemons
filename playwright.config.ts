@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/platform/**',
   timeout: 60_000,
   retries: 1,
   reporter: [['list']],

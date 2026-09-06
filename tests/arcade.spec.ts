@@ -16,7 +16,7 @@ function watchErrors(page: Page) {
 test('menu renders both modes without errors', async ({ page }) => {
   const errors = watchErrors(page)
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /Lammy's Lemonade Smash/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Lambs & Lemons/i })).toBeVisible()
   await expect(page.getByRole('button', { name: /Smash!/i })).toBeVisible()
   await expect(page.getByRole('button', { name: /My Stand/i })).toBeVisible()
   expect(errors).toEqual([])

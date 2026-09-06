@@ -7,11 +7,22 @@ import {
   finishRound,
   preFreeCritters,
   serveCup,
+  stayInChapter,
   swingHammer,
   takeSnapshot,
   updateGame,
 } from './engine'
 import { useKeyboardInput } from './input'
+import { saveCheckpoint, restoreCheckpoint } from './checkpoint'
+import { getGuidance, type Guidance } from './guidance'
+import {
+  nearbyResident,
+  residentFor,
+  placeNote,
+  type Resident,
+} from './residents'
+import { rememberResident } from '../lib/journal'
+import { ResidentPortrait } from '../ui/ResidentPortrait'
 import { TREE_HEALTH } from './constants'
 import type { GameInput, GameSnapshot, GameState, RoundMinutes } from './types'
 import { CHAPTERS, nextChapter, type Chapter } from './campaign'
@@ -20,6 +31,7 @@ import { StoryHud, ChapterOverlay } from './StoryOverlays'
 import { ValleyRenderer } from '../render/Renderer'
 import {
   readBestScores,
+  readJourney,
   readLeaderboard,
   readQuality,
   recordBestRound,
@@ -73,7 +85,9 @@ const emptySnapshot: GameSnapshot = {
 }
 
 /** World events that get panned and attenuated relative to the camera. */
-const SPATIAL_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>> = {
+const SPATIAL_SOUNDS: Partial<
+  Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>
+> = {
   smash: 'splat',
   whiff: 'whoosh',
   treeBreak: 'crack',
@@ -85,7 +99,9 @@ const SPATIAL_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager[
 }
 
 /** ...and the ones that belong to the player, not to a place. */
-const FLAT_SOUNDS: Partial<Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>> = {
+const FLAT_SOUNDS: Partial<
+  Record<GameEvent['type'], Parameters<SoundManager['play']>[0]>
+> = {
   countdown: 'tick',
 }
 
@@ -102,8 +118,15 @@ function strain(health: number) {
  * `navigator.vibrate` entirely, which is fine — it's an enhancement, not a cue.
  */
 function buzz(pattern: number | number[]) {
-  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
-  if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (
+    typeof navigator === 'undefined' ||
+    typeof navigator.vibrate !== 'function'
+  )
+    return
+  if (
+    typeof matchMedia === 'function' &&
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {
     return
   }
   try {
@@ -121,6 +144,7 @@ export function GameCanvas({
   decorations,
   chapter,
   onChapterComplete,
+  onChapterFinished,
 }: {
   sound: SoundManager
   muted: boolean
@@ -131,6 +155,7 @@ export function GameCanvas({
   /** Present in story mode: which place this is, and what it asks for. */
   chapter?: Chapter
   onChapterComplete?: (chapterId: string) => void
+  onChapterFinished?: (chapterId: string) => void
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -150,6 +175,21 @@ export function GameCanvas({
   soundRef.current = sound
   decorationsRef.current = decorations ?? []
 
+  const pausedRef = useRef(false)
+  const actionPointerRef = useRef<number | null>(null)
+  const chapterFinishedRef = useRef(onChapterFinished)
+  chapterFinishedRef.current = onChapterFinished
+  const [conversation, setConversation] = useState<{
+    resident: Resident
+    shared: boolean
+  } | null>(null)
+  const [neighbour, setNeighbour] = useState<Resident | null>(null)
+  const [sharedMoment, setSharedMoment] = useState<Resident | null>(null)
+  const [paused, setPaused] = useState(false)
+  const [rendererError, setRendererError] = useState(false)
+  const [journalAvailable, setJournalAvailable] = useState(true)
+  const [saveAvailable, setSaveAvailable] = useState(true)
+  const [guidance, setGuidance] = useState<Guidance | null>(null)
   const [ready, setReady] = useState(false)
   const [roundMinutes, setRoundMinutes] = useState<RoundMinutes>(2)
   const [snapshot, setSnapshot] = useState<GameSnapshot>(emptySnapshot)
@@ -159,7 +199,9 @@ export function GameCanvas({
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [quality, setQuality] = useState<QualityChoice>(() => readQuality())
   // Resolved once the world is built, because `?chapter=` can supply it too.
-  const [activeChapter, setActiveChapter] = useState<Chapter | undefined>(chapter)
+  const [activeChapter, setActiveChapter] = useState<Chapter | undefined>(
+    chapter,
+  )
   roundMinutesRef.current = roundMinutes
 
   const bestForRound = useMemo(
@@ -204,14 +246,38 @@ export function GameCanvas({
         20260802,
         playing,
       )
+      if (
+        playing &&
+        !params.has('over') &&
+        !params.has('flock') &&
+        !params.has('heal')
+      ) {
+        const restored = restoreCheckpoint(game)
+        if (restored) {
+          for (const critter of game.critters.filter(
+            (c) => c.state !== 'lost',
+          )) {
+            const resident = residentFor(game.chapterId, critter.id)
+            if (resident && !rememberResident(resident.id, true))
+              setJournalAvailable(false)
+          }
+        }
+        // Older completion-only saves still open a welcoming restored place.
+        if (!restored && readJourney().completed.includes(playing.id)) {
+          finishRound(game, 'valleyWoke')
+          stayInChapter(game)
+          drainEvents(game)
+        }
+      }
       const flockParam = Number(params.get('flock'))
-      if (Number.isFinite(flockParam) && flockParam > 0) preFreeCritters(game, flockParam)
+      if (Number.isFinite(flockParam) && flockParam > 0)
+        preFreeCritters(game, flockParam)
       const overParam = params.get('over')
       if (overParam === 'woke' || overParam === 'sunset') {
         finishRound(game, overParam === 'woke' ? 'valleyWoke' : 'sunset')
       }
       gameRef.current = game
-      lastPhaseRef.current = game.phase
+      lastPhaseRef.current = game.phase === 'ended' ? 'playing' : game.phase
       try {
         rendererRef.current = new ValleyRenderer(canvas, game, {
           healOverride: healParam === null ? undefined : Number(healParam),
@@ -224,6 +290,7 @@ export function GameCanvas({
         })
       } catch (error) {
         console.error('Unable to start the 3D renderer', error)
+        setRendererError(true)
         return
       }
       setSnapshot(takeSnapshot(game))
@@ -234,9 +301,26 @@ export function GameCanvas({
     return () => {
       cancelled = true
       cancelAnimationFrame(handle)
+      if (gameRef.current) saveCheckpoint(gameRef.current)
       rendererRef.current?.dispose()
       rendererRef.current = null
+      soundRef.current.stopScene()
     }
+  }, [])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const lost = (event: Event) => {
+      event.preventDefault()
+      if (gameRef.current) saveCheckpoint(gameRef.current)
+      pausedRef.current = true
+      actionPointerRef.current = null
+      inputRef.current = EMPTY_INPUT
+      soundRef.current.stopScene()
+      setRendererError(true)
+    }
+    canvas?.addEventListener('webglcontextlost', lost)
+    return () => canvas?.removeEventListener('webglcontextlost', lost)
   }, [])
 
   // Keep the drawing buffer matched to the stage element.
@@ -265,6 +349,7 @@ export function GameCanvas({
     let frame = 0
     let lastTime = performance.now()
     let lastUiTime = 0
+    let lastSaveTime = 0
 
     const tick = (now: number) => {
       const state = gameRef.current
@@ -272,7 +357,14 @@ export function GameCanvas({
       const dt = Math.min(0.05, (now - lastTime) / 1000)
       lastTime = now
 
+      if (pausedRef.current || document.hidden) {
+        frame = requestAnimationFrame(tick)
+        return
+      }
       if (state && renderer) {
+        if (actionPointerRef.current !== null && state.phase === 'playing') {
+          if (!serveCup(state)) swingHammer(state)
+        }
         updateGame(state, inputRef.current, dt)
 
         const events = drainEvents(state)
@@ -284,12 +376,14 @@ export function GameCanvas({
             if (flat) sound.play(flat)
 
             const spatial = SPATIAL_SOUNDS[event.type]
-            if (spatial && 'x' in event && 'z' in event) sound.playAt(spatial, event.x, event.z)
+            if (spatial && 'x' in event && 'z' in event)
+              sound.playAt(spatial, event.x, event.z)
 
             switch (event.type) {
               case 'zest':
                 // Only the big bursts get a voice, or every smash would chime twice.
-                if (event.radius >= ZEST_SOUND_RADIUS) sound.playAt('zest', event.x, event.z)
+                if (event.radius >= ZEST_SOUND_RADIUS)
+                  sound.playAt('zest', event.x, event.z)
                 break
               case 'smash':
                 buzz(12)
@@ -310,11 +404,22 @@ export function GameCanvas({
               case 'treeBreak':
                 buzz([18, 40, 26])
                 break
-              case 'critterServed':
-                sound.playAt(event.sparkle ? 'sparkle' : 'ding', event.x, event.z)
+              case 'critterServed': {
+                const resident = residentFor(state.chapterId, event.critterId)
+                if (resident) {
+                  if (!rememberResident(resident.id, true))
+                    setJournalAvailable(false)
+                  setSharedMoment(resident)
+                }
+                sound.playAt(
+                  event.sparkle ? 'sparkle' : 'ding',
+                  event.x,
+                  event.z,
+                )
                 sound.playAt('bleat', event.x, event.z)
                 buzz([22, 50, 22, 50, 38])
                 break
+              }
               case 'flockJoin':
                 sound.playAt('bleat', event.x, event.z)
                 sound.play('coin')
@@ -343,8 +448,12 @@ export function GameCanvas({
             listenerRef.current.forwardZ,
           )
           const urgency =
-            state.phase === 'playing'
-              ? 1 - Math.min(1, state.timeLeft / Math.max(1, state.roundMinutes * 60))
+            state.phase === 'playing' && state.mode === 'arcade'
+              ? 1 -
+                Math.min(
+                  1,
+                  state.timeLeft / Math.max(1, state.roundMinutes * 60),
+                )
               : 0
           sound.updateMix(state.bloomCoverage, urgency, renderer.windStrength)
         }
@@ -355,6 +464,11 @@ export function GameCanvas({
           // never used, so recording it here would overwrite the player's real
           // two-minute Smash best with an untimed journey result and file it on
           // the leaderboard as though it had been raced.
+          if (state.chapterId) {
+            saveCheckpoint(state)
+            chapterFinishedRef.current?.(state.chapterId)
+          }
+          actionPointerRef.current = null
           let newBest = false
           if (state.mode === 'arcade') {
             const recorded = recordBestRound(
@@ -387,7 +501,16 @@ export function GameCanvas({
         renderer.frame(state, dt)
         if (now - lastUiTime > 90) {
           setSnapshot(takeSnapshot(state))
+          setGuidance(getGuidance(state))
+          const nearby = nearbyResident(state)
+          setNeighbour(
+            nearby ? (residentFor(state.chapterId, nearby.id) ?? null) : null,
+          )
           lastUiTime = now
+          if (now - lastSaveTime > 5000 && state.mode === 'story') {
+            setSaveAvailable(saveCheckpoint(state))
+            lastSaveTime = now
+          }
         }
       }
 
@@ -439,12 +562,17 @@ export function GameCanvas({
    */
   const handleAction = useCallback(() => {
     const game = gameRef.current
-    if (!game) return
+    if (!game || pausedRef.current || game.phase !== 'playing') return
     if (serveCup(game)) return
     swingHammer(game)
   }, [])
 
-  useKeyboardInput(inputRef, joystickActiveRef, handleAction)
+  useKeyboardInput(
+    inputRef,
+    joystickActiveRef,
+    handleAction,
+    ready && !paused && snapshot.phase === 'playing',
+  )
 
   const updateJoystick = (event: PointerEvent<HTMLDivElement>) => {
     const target = event.currentTarget
@@ -467,18 +595,89 @@ export function GameCanvas({
     setStick({ active: true, x: visualX, y: visualY })
   }
 
-  const releaseJoystick = () => {
+  const releaseJoystick = useCallback(() => {
     joystickPointerRef.current = null
     joystickActiveRef.current = false
     inputRef.current = EMPTY_INPUT
     setStick({ active: false, x: 0, y: 0 })
+  }, [])
+
+  const pauseGame = useCallback(() => {
+    if (gameRef.current?.phase !== 'playing') return
+    if (gameRef.current?.mode === 'story')
+      setSaveAvailable(saveCheckpoint(gameRef.current))
+    pausedRef.current = true
+    setPaused(true)
+    releaseJoystick()
+    actionPointerRef.current = null
+    soundRef.current.stopScene()
+  }, [releaseJoystick])
+  const resumeGame = useCallback(() => {
+    pausedRef.current = false
+    setPaused(false)
+    setConversation(null)
+    soundRef.current.startScene()
+  }, [])
+  useEffect(() => {
+    if (!sharedMoment) return
+    const timer = window.setTimeout(() => setSharedMoment(null), 8000)
+    return () => window.clearTimeout(timer)
+  }, [sharedMoment])
+  const talkToNeighbour = () => {
+    const state = gameRef.current
+    if (!state) return
+    const nearby = nearbyResident(state)
+    const resident = nearby && residentFor(state.chapterId, nearby.id)
+    if (!nearby || !resident) return
+    pauseGame()
+    const shared = nearby.state !== 'lost'
+    if (!rememberResident(resident.id, shared)) setJournalAvailable(false)
+    setSharedMoment(null)
+    setConversation({ resident, shared })
   }
+  const stayHere = () => {
+    const state = gameRef.current
+    if (!state || !stayInChapter(state)) return
+    lastPhaseRef.current = 'playing'
+    setSnapshot(takeSnapshot(state))
+    setSharedMoment(null)
+    setSaveAvailable(saveCheckpoint(state))
+    soundRef.current.startScene()
+  }
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) pauseGame()
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.code === 'Escape') {
+        event.preventDefault()
+        if (pausedRef.current) resumeGame()
+        else pauseGame()
+      }
+    }
+    window.addEventListener('blur', pauseGame)
+    window.addEventListener('keydown', onEscape)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('blur', pauseGame)
+      window.removeEventListener('keydown', onEscape)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [pauseGame, resumeGame])
 
   return (
     <main className="game-shell immersive">
-      <section className="phone-stage world" ref={stageRef} aria-label="Lambs & Lemons: The Sour Valley">
+      <section
+        className="phone-stage world"
+        ref={stageRef}
+        aria-label="Lambs & Lemons: The Sour Valley"
+      >
         <canvas className="game-canvas" ref={canvasRef} aria-hidden="true" />
-        <div className="floater-layer" ref={floaterLayerRef} aria-hidden="true" />
+        <div
+          className="floater-layer"
+          ref={floaterLayerRef}
+          aria-hidden="true"
+        />
 
         {/* Held back until the world exists — a HUD full of zeros over an empty
             canvas is worse than no HUD. */}
@@ -489,9 +688,187 @@ export function GameCanvas({
             <GameHud snapshot={snapshot} best={bestForRound} />
           ))}
 
-        {!ready && <div className="loading-panel">Growing the valley…</div>}
+        {!ready && !rendererError && (
+          <div className="loading-panel" role="status">
+            Growing the valley…
+          </div>
+        )}
+        {rendererError && (
+          <div className="game-overlay">
+            <div className="end-panel" role="alert">
+              <h2>The valley couldn’t open</h2>
+              <p>
+                Your browser’s 3D graphics are unavailable. Try reopening the
+                game in Safari or Chrome.
+              </p>
+              <button
+                className="start-button"
+                onClick={() => window.location.reload()}
+              >
+                Try again
+              </button>
+              <button className="quiet-button" onClick={onExit}>
+                Back home
+              </button>
+            </div>
+          </div>
+        )}
+        {ready && snapshot.phase === 'playing' && (
+          <button
+            className="pause-control paper-button"
+            aria-label="Pause game"
+            onClick={pauseGame}
+          >
+            Ⅱ
+          </button>
+        )}
+        {paused && !conversation && (
+          <div className="game-overlay pause-overlay">
+            <div
+              className="end-panel pause-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="pause-title"
+              onKeyDown={(event) => {
+                if (event.key !== 'Tab') return
+                const buttons = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                    'button',
+                  ),
+                )
+                const first = buttons[0],
+                  last = buttons[buttons.length - 1]
+                if (event.shiftKey && document.activeElement === first) {
+                  event.preventDefault()
+                  last?.focus()
+                } else if (!event.shiftKey && document.activeElement === last) {
+                  event.preventDefault()
+                  first?.focus()
+                }
+              }}
+            >
+              <span className="pause-lemon" aria-hidden="true">
+                🍋
+              </span>
+              <p className="eyebrow">TAKE A LITTLE BREAK</p>
+              <h2 id="pause-title">The valley can wait.</h2>
+              <p>
+                {activeChapter
+                  ? placeNote(activeChapter.id).invitation
+                  : 'Your game is paused. Stay a while.'}
+              </p>
+              <button className="start-button" autoFocus onClick={resumeGame}>
+                Keep playing
+              </button>
+              <button className="paper-button" onClick={onToggleMute}>
+                {muted ? 'Turn sound on' : 'Turn sound off'}
+              </button>
+              <button className="quiet-button" onClick={onExit}>
+                {activeChapter ? 'Journal & chapter map' : 'Back home'}
+              </button>
+              <small>
+                {activeChapter
+                  ? saveAvailable && journalAvailable
+                    ? 'Your journey saves on this device as you play.'
+                    : 'Saving is unavailable. Keep this tab open to keep your progress.'
+                  : 'Leaving ends this round.'}
+              </small>
+            </div>
+          </div>
+        )}
+        {conversation && (
+          <div className="game-overlay conversation-overlay">
+            <div
+              className="conversation-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="conversation-name"
+              onKeyDown={(event) => {
+                if (event.key === 'Tab') {
+                  event.preventDefault()
+                  event.currentTarget.querySelector('button')?.focus()
+                }
+              }}
+            >
+              <ResidentPortrait
+                kind={conversation.resident.kind}
+                name={conversation.resident.name}
+              />
+              <p className="eyebrow">{conversation.resident.interest}</p>
+              <h2 id="conversation-name">{conversation.resident.name}</h2>
+              <p className="conversation-words">
+                “
+                {conversation.shared
+                  ? conversation.resident.thanks
+                  : conversation.resident.hello}
+                ”
+              </p>
+              <small>
+                {conversation.shared
+                  ? '♥ A cup shared. A friend to come back to.'
+                  : 'Added to your valley journal.'}
+              </small>
+              <button className="start-button" autoFocus onClick={resumeGame}>
+                See you around
+              </button>
+            </div>
+          </div>
+        )}
+        {sharedMoment && !paused && snapshot.phase === 'playing' && (
+          <div className="shared-moment" role="status">
+            <ResidentPortrait
+              kind={sharedMoment.kind}
+              name={sharedMoment.name}
+            />
+            <div>
+              <strong>{sharedMoment.name} · a cup shared</strong>
+              <p>“{sharedMoment.thanks}”</p>
+            </div>
+          </div>
+        )}
+        {ready && !paused && snapshot.phase === 'playing' && guidance && (
+          <aside className="field-guide" aria-label="Your next step">
+            {neighbour && (
+              <button
+                className="neighbour-talk paper-button"
+                onClick={talkToNeighbour}
+              >
+                Say hello to {neighbour.name} <span aria-hidden="true">↗</span>
+              </button>
+            )}
+            <div className="guide-inventory">
+              <span>🍋 {snapshot.lemons + snapshot.juice}</span>
+              <span>🥤 {snapshot.cups}/3</span>
+              {snapshot.brewing && (
+                <span className="brewing-label">Mixing…</span>
+              )}
+            </div>
+            <div className="guide-step">
+              <span className="guide-icon" aria-hidden="true">
+                {guidance.icon}
+              </span>
+              <div>
+                <strong>
+                  {snapshot.canServe
+                    ? 'A cup of kindness. Tap Give!'
+                    : guidance.title}
+                </strong>
+                <small>{guidance.detail}</small>
+              </div>
+              {guidance.angle !== null && (
+                <span
+                  className="guide-compass"
+                  aria-label={`Target about ${guidance.distance} steps away`}
+                >
+                  <b style={{ transform: `rotate(${guidance.angle}deg)` }}>↑</b>
+                  <small>{guidance.distance}</small>
+                </span>
+              )}
+            </div>
+          </aside>
+        )}
 
-        {snapshot.phase === 'ready' && !activeChapter && (
+        {ready && snapshot.phase === 'ready' && !activeChapter && (
           <StartOverlay
             roundMinutes={roundMinutes}
             best={bestForRound}
@@ -511,6 +888,7 @@ export function GameCanvas({
               next={nextChapter(activeChapter.id)}
               onNext={() => onChapterComplete?.(activeChapter.id)}
               onHome={onExit}
+              onStay={stayHere}
             />
           ) : (
             <EndOverlay
@@ -527,6 +905,7 @@ export function GameCanvas({
         <button
           className="mute-control"
           type="button"
+          onPointerDown={(event) => event.preventDefault()}
           onClick={onToggleMute}
           aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
         >
@@ -534,12 +913,15 @@ export function GameCanvas({
         </button>
 
         <div
-          className={`controls-layer${snapshot.phase === 'playing' ? '' : ' idle'}`}
-          aria-hidden={snapshot.phase !== 'playing'}
+          className={`controls-layer${ready && !paused && snapshot.phase === 'playing' ? '' : ' idle'}`}
+          inert={!ready || paused || snapshot.phase !== 'playing'}
+          aria-hidden={!ready || paused || snapshot.phase !== 'playing'}
         >
           <div
             className="joystick"
             onPointerDown={(event) => {
+              if (joystickPointerRef.current !== null || pausedRef.current)
+                return
               joystickPointerRef.current = event.pointerId
               joystickActiveRef.current = true
               try {
@@ -550,10 +932,18 @@ export function GameCanvas({
               updateJoystick(event)
             }}
             onPointerMove={(event) => {
-              if (joystickPointerRef.current === event.pointerId) updateJoystick(event)
+              if (joystickPointerRef.current === event.pointerId)
+                updateJoystick(event)
             }}
-            onPointerUp={releaseJoystick}
-            onPointerCancel={releaseJoystick}
+            onPointerUp={(event) => {
+              if (joystickPointerRef.current === event.pointerId)
+                releaseJoystick()
+            }}
+            onPointerCancel={(event) => {
+              if (joystickPointerRef.current === event.pointerId)
+                releaseJoystick()
+            }}
+            onLostPointerCapture={releaseJoystick}
             role="application"
             aria-label="Move lamb"
           >
@@ -566,10 +956,38 @@ export function GameCanvas({
           <button
             className={`smash-control${snapshot.canServe ? ' serving' : ''}`}
             type="button"
-            aria-label={snapshot.canServe ? 'Give a cup' : 'Smash'}
+            aria-label={
+              snapshot.canServe
+                ? 'Give a cup'
+                : activeChapter
+                  ? 'Gather'
+                  : 'Smash'
+            }
             onPointerDown={(event) => {
               event.preventDefault()
+              if (actionPointerRef.current !== null) return
+              actionPointerRef.current = event.pointerId
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId)
+              } catch {
+                /* Synthetic touch. */
+              }
               handleAction()
+            }}
+            onPointerUp={(event) => {
+              if (actionPointerRef.current === event.pointerId)
+                actionPointerRef.current = null
+            }}
+            onPointerCancel={(event) => {
+              if (actionPointerRef.current === event.pointerId)
+                actionPointerRef.current = null
+            }}
+            onLostPointerCapture={(event) => {
+              if (actionPointerRef.current === event.pointerId)
+                actionPointerRef.current = null
+            }}
+            onClick={(event) => {
+              if (event.detail === 0) handleAction()
             }}
           >
             {snapshot.canServe ? (
@@ -579,9 +997,18 @@ export function GameCanvas({
             ) : (
               <img src={assetPaths.smashButton} alt="" />
             )}
-            <span>{snapshot.canServe ? 'Give!' : 'Smash'}</span>
+            <span>
+              {snapshot.canServe ? 'Give!' : activeChapter ? 'Gather' : 'Smash'}
+            </span>
           </button>
         </div>
+        {ready && !paused && (
+          <p className="keyboard-hint">
+            <kbd>W A S D</kbd> or arrows to move <span>·</span> <kbd>Space</kbd>{' '}
+            {activeChapter ? 'to gather / give' : 'to smash'} <span>·</span>{' '}
+            <kbd>Esc</kbd> to pause
+          </p>
+        )}
       </section>
     </main>
   )

@@ -6,7 +6,9 @@ import { HowToPlay } from './HowToPlay'
 // three.js is the bulk of the bundle, so the backdrop arrives after the menu has
 // already painted and fades in behind it.
 const ValleyBackdrop = lazy(() =>
-  import('./ValleyBackdrop').then((module) => ({ default: module.ValleyBackdrop })),
+  import('./ValleyBackdrop').then((module) => ({
+    default: module.ValleyBackdrop,
+  })),
 )
 
 export function MenuScreen({
@@ -18,6 +20,8 @@ export function MenuScreen({
   onPlayTycoon,
   onPlayStory,
   storyChapter,
+  completedChapters,
+  onOpenMap,
 }: {
   bestCups: number
   purse: number
@@ -28,6 +32,8 @@ export function MenuScreen({
   onPlayStory: () => void
   /** Title of the chapter waiting to be played, for the button's subtitle. */
   storyChapter: string
+  completedChapters: number
+  onOpenMap: () => void
 }) {
   const [showHowTo, setShowHowTo] = useState(false)
 
@@ -39,7 +45,7 @@ export function MenuScreen({
         </Suspense>
 
         <div className="menu-panel">
-          <img className="title-sun menu-sun" src={assetPaths.sun} alt="" />
+          <p className="eyebrow">A LITTLE LAMB. A BIG LITTLE ADVENTURE.</p>
           <h1 className="menu-title">{GAME_TITLE}</h1>
           <p className="menu-subtitle">{GAME_SUBTITLE}</p>
           <p className="menu-tagline">{GAME_TAGLINE}</p>
@@ -47,23 +53,42 @@ export function MenuScreen({
           <div className="mode-buttons">
             {/* First, because it's the way in for a new player — the timed round
                 assumes you already know what a cup is for. */}
-            <button className="mode-button story" type="button" onClick={onPlayStory}>
+            <button
+              className="mode-button story"
+              type="button"
+              onClick={onPlayStory}
+            >
               <img src={assetPaths.lambIdle} alt="" />
-              <strong>The Journey</strong>
-              <span>{storyChapter}</span>
+              <strong>
+                {completedChapters ? 'Continue the Journey' : 'The Journey'}
+              </strong>
+              <span>
+                {storyChapter} <b aria-hidden="true">→</b>
+              </span>
             </button>
-            <button className="mode-button arcade" type="button" onClick={onPlayArcade}>
+            <button
+              className="mode-button arcade"
+              type="button"
+              onClick={onPlayArcade}
+            >
               <img src={assetPaths.lambSwing} alt="" />
               <strong>Smash!</strong>
-              <span>Wake the valley</span>
+              <span>Arcade · Race the sunset</span>
             </button>
-            <button className="mode-button tycoon" type="button" onClick={onPlayTycoon}>
+            <button
+              className="mode-button tycoon"
+              type="button"
+              onClick={onPlayTycoon}
+            >
               <img src={assetPaths.stand} alt="" />
               <strong>My Stand</strong>
-              <span>Serve + count coins</span>
+              <span>A little lemonade business</span>
             </button>
           </div>
 
+          <button className="map-link" onClick={onOpenMap}>
+            Explore the chapter map <span>{completedChapters}/5 awake</span>
+          </button>
           <div className="menu-strip">
             <span>🥤 Best: {bestCups}</span>
             <span>🪙 Coins: {purse}</span>

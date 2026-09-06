@@ -1,3 +1,4 @@
+import { CHAPTERS, FIRST_CHAPTER, nextChapter } from '../game/campaign'
 import type { BestRound, RoundMinutes } from '../game/types'
 
 export type BestByRound = Partial<Record<RoundMinutes, BestRound>>
@@ -88,7 +89,9 @@ export type QualityChoice = 'auto' | 'low' | 'medium' | 'high'
 
 export function readQuality(): QualityChoice {
   const value = readJson<QualityChoice>(QUALITY_KEY, 'auto')
-  return value === 'low' || value === 'medium' || value === 'high' ? value : 'auto'
+  return value === 'low' || value === 'medium' || value === 'high'
+    ? value
+    : 'auto'
 }
 
 export function writeQuality(choice: QualityChoice) {
@@ -101,4 +104,37 @@ export function readTycoonSave(): TycoonSave {
 
 export function writeTycoonSave(save: TycoonSave) {
   writeJson(TYCOON_KEY, save)
+}
+
+// Chapter IDs are stable save identifiers; unknown or damaged saves start safely.
+export interface JourneySave {
+  current: string
+  completed: string[]
+}
+const JOURNEY_KEY = 'lammy-journey-v1'
+export function readJourney(): JourneySave {
+  const value = readJson<unknown>(JOURNEY_KEY, null)
+  if (!value || typeof value !== 'object')
+    return { current: FIRST_CHAPTER, completed: [] }
+  const saved = value as Partial<JourneySave>
+  const completed = CHAPTERS.filter(
+    (c) => Array.isArray(saved.completed) && saved.completed.includes(c.id),
+  ).map((c) => c.id)
+  const current =
+    CHAPTERS.find(
+      (c) =>
+        c.id === saved.current &&
+        (c.id === FIRST_CHAPTER ||
+          completed.includes(CHAPTERS[CHAPTERS.indexOf(c) - 1]?.id)),
+    )?.id ?? FIRST_CHAPTER
+  return { current, completed }
+}
+export function completeChapter(save: JourneySave, id: string): JourneySave {
+  if (!CHAPTERS.some((c) => c.id === id)) return save
+  const completed = CHAPTERS.filter(
+    (c) => c.id === id || save.completed.includes(c.id),
+  ).map((c) => c.id)
+  const result = { current: nextChapter(id)?.id ?? id, completed }
+  writeJson(JOURNEY_KEY, result)
+  return result
 }

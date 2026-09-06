@@ -37,7 +37,8 @@ export function ValleyBackdrop({ heal = 0.82 }: { heal?: number }) {
           // could be — the round itself always opens drained and grey.
           healOverride: heal,
           bloomFlooded: true,
-          adaptive: false,
+          adaptive: true,
+          tier: 'low',
         })
       } catch (error) {
         console.warn('Valley backdrop unavailable', error)
@@ -59,6 +60,10 @@ export function ValleyBackdrop({ heal = 0.82 }: { heal?: number }) {
         const dt = Math.min(0.05, (now - last) / 1000)
         last = now
 
+        if (document.hidden) {
+          frame = requestAnimationFrame(tick)
+          return
+        }
         // A long, lazy circle. Slow enough to read as grazing, not patrolling.
         const angle = now * 0.00016
         input.x = Math.cos(angle) * 0.55

@@ -19,7 +19,7 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
           <span className="howto-arrow">→</span>
           <img src={assetPaths.lemon} alt="" />
           <span className="howto-icon">🌈</span>
-          <strong>SMASH</strong>
+          <strong>GATHER</strong>
         </div>
         <div className="howto-row">
           <img src={assetPaths.stand} alt="" />
@@ -35,7 +35,7 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
           <strong>GIVE</strong>
         </div>
 
-        <p className="howto-story">Find everyone before the sun goes down!</p>
+        <p className="howto-story">Journey: wander, gather fruit, and share a cup. No clock. Arcade: smash and share before sunset!</p>
 
         <button className="start-button" type="button" onClick={onClose}>
           OK!

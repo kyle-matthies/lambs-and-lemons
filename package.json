@@ -11,7 +11,9 @@
     "test:e2e": "playwright test",
     "shots": "node scripts/shoot.mjs .shots '?mode=arcade&go=1' 1280 800 arcade",
     "sim": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/register-ts.mjs scripts/simulate.mjs",
-    "test:sim": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/register-ts.mjs scripts/simulate.mjs --assert"
+    "test:sim": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/register-ts.mjs scripts/simulate.mjs --assert",
+    "test:platform": "playwright test -c playwright.platform.config.ts",
+    "test:reliability": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/register-ts.mjs scripts/check-reliability.mjs"
   },
   "dependencies": {
     "@types/three": "^0.185.3",

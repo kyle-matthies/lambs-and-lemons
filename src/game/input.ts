@@ -21,8 +21,11 @@ export function useKeyboardInput(
   inputRef: MutableRefObject<GameInput>,
   joystickActiveRef: MutableRefObject<boolean>,
   onSmash: () => void,
+  enabled = true,
 ) {
   useEffect(() => {
+    inputRef.current = { active: false, x: 0, y: 0 }
+    if (!enabled) return
     const pressed = new Set<string>()
 
     const applyMovement = () => {
@@ -45,7 +48,16 @@ export function useKeyboardInput(
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest(
+          'input, select, textarea, [contenteditable=true]',
+        )
+      )
+        return
       if (event.code === 'Space') {
+        if (target instanceof HTMLElement && target.closest('button')) return
         if (!event.repeat) onSmash()
         event.preventDefault()
         return
@@ -70,9 +82,10 @@ export function useKeyboardInput(
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)
     return () => {
+      inputRef.current = { active: false, x: 0, y: 0 }
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [inputRef, joystickActiveRef, onSmash])
+  }, [inputRef, joystickActiveRef, onSmash, enabled])
 }

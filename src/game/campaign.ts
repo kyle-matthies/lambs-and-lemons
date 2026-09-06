@@ -44,8 +44,6 @@ export const CHAPTERS: Chapter[] = [
     },
     critters: 3,
     objectives: [
-      { kind: 'smash', count: 8 },
-      { kind: 'brew', count: 2 },
       { kind: 'freeCount', count: 3 },
     ],
   },
@@ -68,9 +66,6 @@ export const CHAPTERS: Chapter[] = [
     critters: 6,
     objectives: [
       { kind: 'freeCount', count: 4 },
-      // Water counts toward coverage but can never take colour, and the pond is
-      // a sixth of this meadow — so the target is set below what it looks like.
-      { kind: 'bloom', target: 0.42 },
     ],
   },
   {
@@ -93,17 +88,16 @@ export const CHAPTERS: Chapter[] = [
     critters: 7,
     objectives: [
       { kind: 'freeCount', count: 5 },
-      { kind: 'breakTrees', count: 10 },
     ],
   },
   {
     id: 'grey-ridge',
     title: 'The Grey Ridge',
-    blurb: 'Bare stone and hardly a lemon tree. The hardest walk of the journey.',
+    blurb: 'Quiet paths, a wide sky, and flowers growing where nobody expected.',
     seed: 40_040,
     // The hills come in close and go up high, the ground is broken, and there is
-    // almost nothing growing. Every lemon has to be worked for, which is what
-    // makes this the chapter you remember.
+    // little growing. The walk and the neighbours give this place its character;
+    // scarce trees are not a reason to demand a colour-coverage grind.
     recipe: {
       playRadius: 26,
       rim: { start: 0.62, end: 1.4, height: 13, rock: 5.5 },
@@ -116,10 +110,6 @@ export const CHAPTERS: Chapter[] = [
     critters: 7,
     objectives: [
       { kind: 'freeCount', count: 5 },
-      // The ridge is the long one. Dry ground makes every cell reachable, so the
-      // target can go high — and with seven trees on the whole hillside, the
-      // lemons to do it with have to be hunted.
-      { kind: 'bloom', target: 0.68 },
     ],
   },
   {

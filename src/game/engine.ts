@@ -253,7 +253,7 @@ export function updateGame(state: GameState, input: GameInput, dt: number) {
 
   // Checked last, so the objective that a bloom target depends on sees this
   // frame's colour rather than the previous one's.
-  if (state.mode === 'story' && objectivesComplete(state)) endRound(state, 'valleyWoke')
+  if (state.mode === 'story' && state.outcome === null && objectivesComplete(state)) endRound(state, 'valleyWoke')
 }
 
 /**
@@ -276,6 +276,14 @@ export function finishRound(state: GameState, outcome: 'sunset' | 'valleyWoke') 
   }
   state.timeLeft = 0
   endRound(state, outcome)
+}
+
+export function stayInChapter(state: GameState): boolean {
+  if (state.mode !== 'story' || state.outcome !== 'valleyWoke') return false
+  state.phase = 'playing'
+  state.player.vx = 0
+  state.player.vz = 0
+  return true
 }
 
 function endRound(state: GameState, outcome: GameState['outcome']) {
@@ -386,7 +394,10 @@ export function swingHammer(state: GameState) {
     if (tree.stage !== 'full') continue
     if (distance2D(tree.x, tree.z, hitX, hitZ) >= TREE_HIT_RADIUS * tree.scale) continue
 
-    tree.health -= 1
+    // Adventure harvests fruit without felling the orchard. The shared wobble
+    // timer also prevents holding the action from producing unlimited fruit.
+    if (state.mode === 'story' && tree.wobbleTimer > 0) continue
+    if (state.mode === 'arcade') tree.health -= 1
     tree.wobbleTimer = TREE_WOBBLE_TIME
     tree.wobbleAngle = Math.atan2(tree.x - player.x, tree.z - player.z)
     hitSomething = true
@@ -529,9 +540,8 @@ export function serveCup(state: GameState): Critter | null {
   state.inventory.score += served.sparkle ? SCORE_SPARKLE_CUP : SCORE_CUP
 
   // In arcade mode the last cup *is* the win. A chapter, though, ends when its
-  // stated work is done and not a moment sooner — otherwise you could free
-  // everyone in the orchard and be thrown out with trees still standing and a
-  // checklist that never got ticked. That check lives in `updateGame`.
+  // invitations are fulfilled; that check lives in `updateGame`. A restored
+  // chapter can stay open for further conversations and cups.
   if (state.mode === 'arcade' && countLost(state.critters) === 0) {
     endRound(state, 'valleyWoke')
   }

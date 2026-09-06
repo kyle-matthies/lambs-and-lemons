@@ -12,7 +12,9 @@ function watchErrors(page: Page) {
   return errors
 }
 
-test('the journey is reachable from the menu and opens on the first chapter', async ({ page }) => {
+test('the journey is reachable from the menu and opens on the first chapter', async ({
+  page,
+}) => {
   const errors = watchErrors(page)
   await page.goto('/')
 
@@ -27,17 +29,19 @@ test('the journey is reachable from the menu and opens on the first chapter', as
   expect(errors).toEqual([])
 })
 
-test('a chapter shows its objectives and no clock', async ({ page }) => {
+test('a chapter invites sharing without chores or a clock', async ({
+  page,
+}) => {
   await page.goto('/?chapter=1')
 
   const checklist = page.getByRole('list', { name: /What to do here/i })
   await expect(checklist).toBeVisible({ timeout: 60_000 })
 
-  // Chapter one teaches the loop one verb at a time.
-  await expect(checklist).toContainText('Smash lemons')
-  await expect(checklist).toContainText('Make lemonade')
-  await expect(checklist).toContainText('Give out lemonade')
-  await expect(checklist.getByRole('listitem')).toHaveCount(3)
+  await expect(checklist).toContainText('Share a cup')
+  await expect(checklist.getByRole('listitem')).toHaveCount(1)
+  await expect(
+    page.getByRole('button', { name: 'Gather', exact: true }),
+  ).toBeVisible()
 
   // The whole point of story mode: nothing is counting down. The arcade HUD
   // labels its timer "Sunset", so its absence is the thing worth asserting.
@@ -46,46 +50,71 @@ test('a chapter shows its objectives and no clock', async ({ page }) => {
 
 test('each chapter is its own place', async ({ page }) => {
   await page.goto('/?chapter=4')
-  await expect(page.getByText('THE GREY RIDGE')).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText('THE GREY RIDGE')).toBeVisible({
+    timeout: 60_000,
+  })
 
   const checklist = page.getByRole('list', { name: /What to do here/i })
-  await expect(checklist).toContainText('Bring back the colour')
+  await expect(checklist).toContainText('Share a cup')
 
   // The ridge asks for five of its seven, not for everyone — chapters differ in
   // what they want, not just in how they look.
   await expect(checklist).toContainText('0/5')
 })
 
-test('a finished chapter says only what actually happened', async ({ page }) => {
+test('a finished chapter says only what actually happened', async ({
+  page,
+}) => {
   // Chapters 2-4 ask for some of their creatures, not all, so the ending card
   // must not claim everyone got a cup. `?over=woke` frees the lot, which is the
   // one case where it may.
   await page.goto('/?chapter=2&over=woke')
-  await expect(page.getByText(/THE POND HOLLOW IS AWAKE/i)).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(/THE POND HOLLOW IS AWAKE/i)).toBeVisible({
+    timeout: 60_000,
+  })
   await expect(page.getByText(/Everyone here has had a cup/i)).toBeVisible()
 })
 
-test('objectives tick over as the simulation runs', async ({ page }) => {
+test('following the visible guide gathers fruit in the adventure', async ({
+  page,
+}) => {
   await page.goto('/?chapter=1')
   const checklist = page.getByRole('list', { name: /What to do here/i })
   await expect(checklist).toBeVisible({ timeout: 60_000 })
 
-  const smashLine = checklist.getByRole('listitem').first()
-  await expect(smashLine).toContainText('0/8')
+  const ingredients = page.locator('.guide-inventory > span').first()
+  const before = await ingredients.textContent()
 
-  // Walk into the ring of fruit the chapter opens with, then swing — the mallet
-  // only reaches a few metres, so standing still and swinging hits nothing. The
-  // bot in `scripts/simulate.mjs` covers the whole loop; this only proves the
-  // HUD is wired to the same state the simulation is changing.
-  for (let sweep = 0; sweep < 4; sweep += 1) {
-    await page.keyboard.down('ArrowUp')
-    await page.waitForTimeout(700)
-    await page.keyboard.up('ArrowUp')
-    for (let swing = 0; swing < 4; swing += 1) {
-      await page.keyboard.press('Space')
-      await page.waitForTimeout(260)
-    }
-  }
-
-  await expect(smashLine).not.toContainText('0/8')
+  // Follow the visible guide and hold Smash until a real hit registers. Fixed
+  // 700ms keyboard taps barely move on Linux's software GPU; the test should
+  // wait for gameplay, rather than assume a particular rendering speed.
+  const arrow = page.locator('.guide-compass b')
+  await expect(arrow).toBeVisible()
+  const angle = await arrow.evaluate(
+    (element) =>
+      (Number(
+        element.style.transform.match(/rotate\(([-\d.]+)deg\)/)?.[1] ?? 0,
+      ) *
+        Math.PI) /
+      180,
+  )
+  const joystick = page.locator('.joystick')
+  const box = (await joystick.boundingBox())!
+  await joystick.dispatchEvent('pointerdown', {
+    pointerId: 11,
+    pointerType: 'touch',
+    clientX: box.x + box.width / 2 + Math.sin(angle) * box.width * 0.32,
+    clientY: box.y + box.height / 2 - Math.cos(angle) * box.width * 0.32,
+  })
+  await page
+    .locator('.smash-control')
+    .dispatchEvent('pointerdown', { pointerId: 12, pointerType: 'touch' })
+  await expect(ingredients).not.toHaveText(before!, { timeout: 45000 })
+  await joystick.dispatchEvent('pointerup', {
+    pointerId: 11,
+    pointerType: 'touch',
+  })
+  await page
+    .locator('.smash-control')
+    .dispatchEvent('pointerup', { pointerId: 12, pointerType: 'touch' })
 })

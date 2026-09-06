@@ -1,27 +1,40 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { MenuScreen } from './ui/MenuScreen'
-import { CHAPTERS, chapterById, nextChapter, FIRST_CHAPTER } from './game/campaign'
+import {
+  CHAPTERS,
+  chapterById,
+  nextChapter,
+  FIRST_CHAPTER,
+} from './game/campaign'
 import { SoundManager } from './audio/sound'
 import {
   readBestScores,
+  readJourney,
+  completeChapter,
   readMuted,
   readTycoonSave,
   writeMuted,
   writeTycoonSave,
   type TycoonSave,
 } from './lib/storage'
+import { JourneyMap } from './ui/JourneyMap'
 import './App.css'
+import './refinement.css'
 
 // Both play modes pull in three.js, so both load on demand — the menu stays
 // interactive on a small download and the renderer arrives behind it.
 const GameCanvas = lazy(() =>
-  import('./game/GameCanvas').then((module) => ({ default: module.GameCanvas })),
+  import('./game/GameCanvas').then((module) => ({
+    default: module.GameCanvas,
+  })),
 )
 const TycoonScreen = lazy(() =>
-  import('./game/tycoon/TycoonScreen').then((module) => ({ default: module.TycoonScreen })),
+  import('./game/tycoon/TycoonScreen').then((module) => ({
+    default: module.TycoonScreen,
+  })),
 )
 
-type Screen = 'menu' | 'arcade' | 'tycoon' | 'story'
+type Screen = 'menu' | 'arcade' | 'tycoon' | 'story' | 'map'
 
 /**
  * Deep links: `?mode=arcade` or `?mode=stand` opens straight into a mode, and
@@ -34,7 +47,8 @@ function initialScreen(): Screen {
   if (typeof window === 'undefined') return 'menu'
   const params = new URLSearchParams(window.location.search)
   const mode = params.get('mode')
-  if (params.get('chapter') || mode === 'story' || mode === 'journey') return 'story'
+  if (params.get('chapter') || mode === 'story' || mode === 'journey')
+    return 'story'
   if (mode === 'arcade' || mode === 'smash') return 'arcade'
   if (mode === 'stand' || mode === 'tycoon') return 'tycoon'
   return 'menu'
@@ -43,8 +57,10 @@ function initialScreen(): Screen {
 /** Which chapter `?chapter=N` asked for, counting from one. */
 function initialChapter(): string {
   if (typeof window === 'undefined') return FIRST_CHAPTER
-  const requested = Number(new URLSearchParams(window.location.search).get('chapter'))
-  return CHAPTERS[requested - 1]?.id ?? FIRST_CHAPTER
+  const requested = Number(
+    new URLSearchParams(window.location.search).get('chapter'),
+  )
+  return CHAPTERS[requested - 1]?.id ?? readJourney().current
 }
 
 function App() {
@@ -53,11 +69,12 @@ function App() {
   const sound = soundRef.current
 
   const [screen, setScreen] = useState<Screen>(initialScreen)
-  // Where the journey has got to. Held in memory for now; remembering it across
-  // visits arrives with the chapter map.
+  const [journey, setJourney] = useState(readJourney)
   const [chapterId, setChapterId] = useState(initialChapter)
   const [muted, setMuted] = useState(() => readMuted())
-  const [tycoonSave, setTycoonSave] = useState<TycoonSave>(() => readTycoonSave())
+  const [tycoonSave, setTycoonSave] = useState<TycoonSave>(() =>
+    readTycoonSave(),
+  )
 
   useEffect(() => {
     sound.setMuted(muted)
@@ -99,7 +116,22 @@ function App() {
 
   const goHome = () => {
     sound.play('tap')
+    sound.stopScene()
     setScreen('menu')
+  }
+
+  if (screen === 'map') {
+    return (
+      <JourneyMap
+        save={journey}
+        onHome={goHome}
+        onSelect={(id) => {
+          setChapterId(id)
+          sound.play('tap')
+          setScreen('story')
+        }}
+      />
+    )
   }
 
   if (screen === 'story') {
@@ -112,14 +144,20 @@ function App() {
           sound={sound}
           muted={muted}
           onToggleMute={toggleMute}
-          onExit={goHome}
+          onExit={() => {
+            sound.stopScene()
+            setScreen('map')
+          }}
+          onChapterFinished={(id) =>
+            setJourney((current) => completeChapter(current, id))
+          }
           decorations={tycoonSave.decorations}
           chapter={chapterById(chapterId)}
           onChapterComplete={(finished) => {
             sound.play('tap')
             const next = nextChapter(finished)
             if (next) setChapterId(next.id)
-            else setScreen('menu')
+            else setScreen('map')
           }}
         />
       </Suspense>
@@ -128,7 +166,9 @@ function App() {
 
   if (screen === 'arcade') {
     return (
-      <Suspense fallback={<div className="boot-panel">Growing the valley…</div>}>
+      <Suspense
+        fallback={<div className="boot-panel">Growing the valley…</div>}
+      >
         <GameCanvas
           sound={sound}
           muted={muted}
@@ -171,9 +211,12 @@ function App() {
       }}
       onPlayStory={() => {
         sound.play('tap')
+        setChapterId(journey.current)
         setScreen('story')
       }}
-      storyChapter={chapterById(chapterId)?.title ?? 'Set out'}
+      storyChapter={chapterById(journey.current)?.title ?? 'Set out'}
+      completedChapters={journey.completed.length}
+      onOpenMap={() => setScreen('map')}
     />
   )
 }

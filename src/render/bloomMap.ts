@@ -1,6 +1,9 @@
 import {
   AdditiveBlending,
   Color,
+  DataTexture,
+  Mesh,
+  MeshBasicMaterial,
   InstancedMesh,
   LinearFilter,
   Matrix4,
@@ -99,7 +102,11 @@ export class BloomMap {
       transparent: true,
     })
 
-    this.mesh = new InstancedMesh(new PlaneGeometry(1, 1), material, MAX_SPLATS_PER_FRAME)
+    this.mesh = new InstancedMesh(
+      new PlaneGeometry(1, 1),
+      material,
+      MAX_SPLATS_PER_FRAME,
+    )
     this.mesh.frustumCulled = false
     // Allocate the instance colour buffer up front: per-splat strength rides in the
     // red channel, and the attribute has to exist before the first compile so the
@@ -128,6 +135,38 @@ export class BloomMap {
     renderer.clear(true, false, false)
     renderer.setClearColor(this.previousClearColor, previousClearAlpha)
     renderer.setRenderTarget(previousTarget)
+    this.pending.length = 0
+    this.needsClear = false
+  }
+
+  /** Rehydrate the authoritative colour field when Safari restores a chapter. */
+  restore(renderer: WebGLRenderer, cells: Float32Array) {
+    const side = Math.sqrt(cells.length)
+    const pixels = new Uint8Array(cells.length * 4)
+    cells.forEach((value, i) => {
+      pixels[i * 4] = Math.round(value * 255)
+      pixels[i * 4 + 3] = 255
+    })
+    const texture = new DataTexture(pixels, side, side, RGBAFormat)
+    texture.minFilter = LinearFilter
+    texture.magFilter = LinearFilter
+    texture.needsUpdate = true
+    const material = new MeshBasicMaterial({
+      map: texture,
+      toneMapped: false,
+      depthTest: false,
+      depthWrite: false,
+    })
+    const geometry = new PlaneGeometry(BLOOM_AREA, BLOOM_AREA)
+    const scene = new Scene()
+    scene.add(new Mesh(geometry, material))
+    const previous = renderer.getRenderTarget()
+    renderer.setRenderTarget(this.target)
+    renderer.render(scene, this.camera)
+    renderer.setRenderTarget(previous)
+    texture.dispose()
+    geometry.dispose()
+    material.dispose()
     this.pending.length = 0
     this.needsClear = false
   }
